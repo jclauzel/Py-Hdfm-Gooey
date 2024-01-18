@@ -31,12 +31,12 @@ feel free to support his development efforts & patreon https://www.patreon.com/m
 HDF Monkey 
 ----------
     
-    If you are running the app on Windows and hdfmonkey in not present in the same directory, you will see an error message in the main log Windows as it is missing.
-       if that is the case you will see a 'Download and Install button' bottom right, once clicked it will try to fetch https://uto.speccy.org/downloads/hdfmonkey_windows.zip 
-       and unzip hdfmonkey executable in the same directory. 
-           If the above automated install is successful, you should then be able to select an image and navigate it.
-            
-    On Mac/Linux you will need to install hdfmonkey manually based on the instructions for your platform that can be found at: https://github.com/gasman/hdfmonkey
+If you are running the app on Windows and hdfmonkey in not present in the same directory, you will see an error message in the main log Windows as it is missing.
+If that is the case you will see a 'Download and Install button' bottom right, once clicked it will try to fetch from
+https://uto.speccy.org/downloads/hdfmonkey_windows.zip and unzip hdfmonkey executable in the same directory. 
+If the above automated install is successful, you should then be able to select an image and navigate it.
+          
+On Mac/Linux you will need to install hdfmonkey manually based on the instructions for your platform that can be found at: https://github.com/gasman/hdfmonkey
   
 NextSync 
 --------
