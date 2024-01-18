@@ -16,8 +16,11 @@ Requirements
 
 * Additional help pages:
     - https://wiki.specnext.dev/Development_Tools:Linux_setup
-       
-* First install pyside6 this is required for the UI to render the different controls being used:
+
+* Install Python from: https://www.python.org/downloads/
+  
+* Install pyside6 this is required for the UI to render the different controls being used:
+
     python -m pip install pyside6
 
 * Copy Cspect (with the Spectrum Next roms) and hdfmonkey in the same directory (see above). 
