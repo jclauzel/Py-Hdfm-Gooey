@@ -68,4 +68,10 @@ If you run in any type of issue using the NextSync integration please run first 
 * On Mac/Linux: you will also need to install manualy mono-complete package for example using: sudo apt-get install mono-complete
     
 * Start py-hdfm-gooey.py
+
+Mono (on Linux & MacOS Only)             
+-----------------------------              
+You will also need to install manualy mono-complete package for example using: sudo apt-get install mono-complete 
+
+Enjoy!
     python py-hdfm-gooey.py
