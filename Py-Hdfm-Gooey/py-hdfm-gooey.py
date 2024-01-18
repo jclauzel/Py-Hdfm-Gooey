@@ -50,7 +50,7 @@ import urllib.request
 import zipfile, traceback
 
 
-PY_HDFM_GOOEY_VERSION = "2.3.0"
+PY_HDFM_GOOEY_VERSION = "2.4"
 PY_HDFM_GOOEY_ICON_IMAGE_FILE = "py-hdfm-gooey.png"
 PY_HDFM_GOOEY_VERBOSE_LOG_MODE = False
 PY_HDFM_GOOEY_UI_WIDTH = 900
@@ -84,7 +84,7 @@ IGNOREFILE = "syncignore.txt"
 SYNCPOINT = "syncpoint.dat"
 MAX_PAYLOAD = 1024
 NEXTSYNC_UI_HEIGTH = 300
-IGNOREFILE_DEFAULT_CONTENT = (("syncignore.txt"), ("syncpoint.dat"), ("py-hdfm-gooey.png"),("*.bak"), ("*.py"))
+IGNOREFILE_DEFAULT_CONTENT = (("syncignore.txt"), ("syncpoint.dat"), ("py-hdfm-gooey.png"),("*.bak"), ("*.py"), ("*.pyproj"), ("*.pyproj"), ("hdfmonkey.exe"), ("hdfg.cfg"))
 
 INIT_LOG = (("NextSync - by Jari Komppa"), ("HDF Monkey - by Matt Westcott"), ("CSpect - by Mike Dailly http://cspect.org"), ("Inspired by HDFM-GOOEY - by em00k"), ("Py-Hdfm-Gooey - by Julien Clauzel 2024"))
 INIT_HELP = (("Welcome to Py Hdfm Gooey help"), 
