@@ -21,6 +21,11 @@ Requirements
     python -m pip install pyside6
 
 * Copy Cspect (with the Spectrum Next roms) and hdfmonkey in the same directory (see above). 
+
+CSpect 
+----------
+CSpect emulator by Mike Dailly installed in local directory please download from http://www.cspect.org
+feel free to support his development efforts & patreon https://www.patreon.com/mikedailly
     
 HDF Monkey 
 ----------
