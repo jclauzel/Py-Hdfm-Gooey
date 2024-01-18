@@ -24,6 +24,7 @@ Requirements
 
 CSpect 
 ----------
+
 CSpect emulator by Mike Dailly installed in local directory please download from http://www.cspect.org
 feel free to support his development efforts & patreon https://www.patreon.com/mikedailly
     
@@ -37,8 +38,9 @@ HDF Monkey
             
     On Mac/Linux you will need to install hdfmonkey manually based on the instructions for your platform that can be found at: https://github.com/gasman/hdfmonkey
   
-NextSync: 
-------- 
+NextSync 
+--------
+
 Py Hdfm Gooey implements the <Server> side code and protocol of NextSync by Jari Komppa.
 It does not require any dot .sync modification and it uses the same very close python logic as nextsync.py.
              
