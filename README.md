@@ -30,6 +30,11 @@ CSpect
 
 CSpect emulator by Mike Dailly installed in local directory please download from http://www.cspect.org
 feel free to support his development efforts & patreon https://www.patreon.com/mikedailly
+
+Other Mike CSpect sites and links:
+https://mdf200.itch.io/cspect
+https://dailly.blogspot.com/
+
     
 HDF Monkey 
 ----------
