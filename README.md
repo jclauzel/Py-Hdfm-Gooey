@@ -1,5 +1,18 @@
 Py-Hdfm-Gooey by Julien Clauzel based on HDFM-GOOEY - by em00k & based on NextSync by Jari Komppa
 
+The first tab of Py Hdfm Gooey is aimed at CSpect emulator users and developers. In that section you can mount an HDF image used by CSpect and upload download content using a built simple file explorer. Once the content is uploaded to the image you can then start CSpect directly from it and therefore exposes a simple to use frontend interface to the emulator. Key settings such as screen size can be directly adjusted, therefore there is no need to know command line options to start using your emulated Spectrum Next.
+
+The second tab is designed for real hardware owners such as KS1, KS2 or other clones that also has an ESP. Jari designed a custom protocol called NextSync that allows to synchronize an entire folder that resides on a remote machine back to the Spectrum Next over the network. This utility implements the “server” side the program that will ‘listen’ and waits for incoming connections from your Next. On your Next machine you will run the custom dot “.sync” command that will therefore connect to the server here Py-Hdfm-Gooey. To set this up you will need first to download Jari zip package. The latest release v1.2 of the .sync command can be found here https://github.com/Threetwosevensixseven/specnext/releases/tag/nextsync_v1.2 . Download Jari the latest release and inside the zip dot folder you will find a file called “SYNC”. Extract and copy that file in the dot folder of your Spectrum Next SD card and boot it up as usual. Make sure WIFI is fully setup normally, that you can access the internet and your machine that will be running Py Hdfm gooey are on the same IP network and that no firewall blocks incoming communication on your “receiving” machine. By default, the protocol works on TCP port 2048.
+Start, python py-hdfm-gooey.py and navigate to NextSync tab. On the built in Explorer select the root folder you’d like to sync and hit the “Prepare NextSync server” button. At this point the server is ready to go but not running yet. The first time I recommend that you select the “Sync once” option so the server will stop after the first run. 
+Since this is the first time you will run the .sync command on your Spectrum Next, the command will ask you to input what IP address it needs to connect to. In the log Window you should the machine Primary IP address. Usually starting by 10.0. or 192.168. memorize the 4x IP address digit for the next step below.
+
+On your Next, select “Command Line” option and then simply type .sync and press enter. At this point as mentioned above it will ask you to what IP address, so input the ip address and press enter. 
+On the next this configuration will be retained into C:/sys/config/nextsync.cfg if you need to change it later either edit the config file or type: .sync followed by the new IP address you wish to use to connect to.
+That’s it you should now be all go to go.
+
+When ready hit the “Yes, start NextSync server” button and on your next type “.sync” again. If everything is set up properly you should now see your next downloading all the files and once done the .sync command will exit.
+For more information please check the “Help” tab in the tool or below.
+
 Requirements
 ------------
 
@@ -24,6 +37,7 @@ Requirements
     python -m pip install pyside6
 
 * Copy Cspect (with the Spectrum Next roms) and hdfmonkey in the same directory (see above). 
+
 
 CSpect 
 ----------
