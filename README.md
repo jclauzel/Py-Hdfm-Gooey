@@ -10,10 +10,12 @@ Since this is the first time you will run the .sync command on your Spectrum Nex
 
 On your Next, select “Command Line” option and then simply type .sync and press enter. At this point as mentioned above it will ask you to what IP address, so input the ip address and press enter. 
 On the next this configuration will be retained into C:/sys/config/nextsync.cfg if you need to change it later either edit the config file or type: .sync followed by the new IP address you wish to use to connect to.
+
 That’s it you should now be all go to go.
 
 When ready hit the “Yes, start NextSync server” button and on your next type “.sync” again. If everything is set up properly you should now see your next downloading all the files and once done the .sync command will exit.
-For more information please check the “Help” tab in the tool or below.
+
+For more information, please check the “Help” tab in the tool or below.
 
 Requirements
 ------------
