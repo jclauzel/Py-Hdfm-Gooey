@@ -99,6 +99,10 @@ If you run in any type of issue using the NextSync integration please run first 
     
 * Start py-hdfm-gooey.py
 
+Mono (on Linux & MacOS Only)             
+-----------------------------
+Since CSpect is written in .NET you will also need to install manualy mono-complete package for example using: sudo apt-get install mono-complete 
+
 Settings
 -----------
 All the settings are retained in a signle file called: hdfg.cfg that will be automatically created in the same directory as the tool.
@@ -113,10 +117,5 @@ Known issues
 •	First time you start the tool if Hdfm Monkey is not present, the log Windows will throw an error message reporting it is missing (as expected). Either download &  install manual hdf monkey or use the Download and install button.
 •	When using NextSync the console may show some “Timer” messages, these may be safely ignored.
 
-
-
-Mono (on Linux & MacOS Only)             
------------------------------
-Since CSpect is written in .NET you will also need to install manualy mono-complete package for example using: sudo apt-get install mono-complete 
 
 
