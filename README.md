@@ -104,6 +104,16 @@ Settings
 All the settings are retained in a signle file called: hdfg.cfg that will be automatically created in the same directory as the tool.
 The file format is compatible with emOOK original tool but contains more options as this utility also provides NextSync support. In the case you’d like to reset all options simply backup and delete the existing hdfg.cfg file.
 
+Known issues
+----------------
+•	The only dependency required tool that may get installed automatically is hdf monkey on Windows, you will need to download, extract & install manually CSpect in the same folder.
+•	Some files on the Spectrum Next image that contain special characters such as single quotes may not be downloaded / retrieved correctly. 
+•	ESP/Wifi module errors may occur if connectivity is instable, if speed is too high you try reducing the flow by hitting the “Slow transfer” checkbox.
+•	Jari provided a great “setup & how” to guide in the nextsync.txt file located in the https://github.com/Threetwosevensixseven/specnext/releases/tag/nextsync_v1.2  nextsync12.zip file. If you hit any setup issue with NextSync you may want to start by using his command line version of it (nextsync.py). Once nextsync12 is able to run and sync it should be the case as well of Next Sync in Py Hdfm Gooey since it based on the same code base as Jari python.
+•	First time you start the tool if Hdfm Monkey is not present, the log Windows will throw an error message reporting it is missing (as expected). Either download &  install manual hdf monkey or use the Download and install button.
+•	When using NextSync the console may show some “Timer” messages, these may be safely ignored.
+
+
 
 Mono (on Linux & MacOS Only)             
 -----------------------------
