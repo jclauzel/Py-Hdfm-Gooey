@@ -44,6 +44,8 @@ Requirements
 
 * Copy Cspect (with the Spectrum Next roms) and hdfmonkey in the same directory (see above). 
 
+start using it by running: 
+    python py-hdfm-gooey.py
 
 CSpect 
 ----------
@@ -98,8 +100,7 @@ If you run in any type of issue using the NextSync integration please run first 
 * Start py-hdfm-gooey.py
 
 Mono (on Linux & MacOS Only)             
------------------------------              
-You will also need to install manualy mono-complete package for example using: sudo apt-get install mono-complete 
+-----------------------------
+Since CSpect is written in .NET you will also need to install manualy mono-complete package for example using: sudo apt-get install mono-complete 
 
-Enjoy!
-    python py-hdfm-gooey.py
+
