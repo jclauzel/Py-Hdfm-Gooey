@@ -99,6 +99,12 @@ If you run in any type of issue using the NextSync integration please run first 
     
 * Start py-hdfm-gooey.py
 
+Settings
+-----------
+All the settings are retained in a signle file called: hdfg.cfg that will be automatically created in the same directory as the tool.
+The file format is compatible with emOOK original tool but contains more options as this utility also provides NextSync support. In the case you’d like to reset all options simply backup and delete the existing hdfg.cfg file.
+
+
 Mono (on Linux & MacOS Only)             
 -----------------------------
 Since CSpect is written in .NET you will also need to install manualy mono-complete package for example using: sudo apt-get install mono-complete 
