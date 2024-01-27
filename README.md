@@ -1,5 +1,11 @@
 Py-Hdfm-Gooey by Julien Clauzel based on HDFM-GOOEY - by em00k & based on NextSync by Jari Komppa
 
+This project is licensed under the terms of the MIT license.
+
+Py-Hdfm-Gooey provides a cross platform (Windows, Linux, MacOS) Graphical Interface that unites two great tools in a single utility: Hdfm-Gooey & Next Sync. 
+* The former is mostly targeted at CSpect emulator users, and it provides a simple to use frontend interface to transfer content to an image and start the Spectrum Next emulator. 
+* The latter allows hardware owners such as Kick Starter & Clones that has a Wifi/ESP module to synchronize content directly from a machine over the network to their Next machines.
+
 The first tab of Py Hdfm Gooey is aimed at CSpect emulator users and developers. In that section you can mount an HDF image used by CSpect and upload download content using a built simple file explorer. Once the content is uploaded to the image you can then start CSpect directly from it and therefore exposes a simple to use frontend interface to the emulator. Key settings such as screen size can be directly adjusted, it avoids the need to know command line options to start using your emulated Spectrum Next.
 
 The second tab is designed for real hardware owners such as KS1, KS2 or other clones that also has an ESP (WIFI module). Jari designed a while back a custom protocol called NextSync that allows to synchronize an entire folder that resides on a remote machine back to the Spectrum Next over the network. This utility implements the “server” side the program that will ‘listen’ and waits for incoming connections from your Next. On your Next machine you will run the custom dot “.sync” command that connects to the server here Py-Hdfm-Gooey. To set this up you will need first to download Jari zip package. The latest release v1.2 of the dot .sync command can be found here https://github.com/Threetwosevensixseven/specnext/releases/tag/nextsync_v1.2 . 
@@ -117,6 +123,8 @@ On other operating systems than Windows: you need to install, configure/compile 
 * Jari provided a great “setup & how” to guide in the nextsync.txt file located in the https://github.com/Threetwosevensixseven/specnext/releases/tag/nextsync_v1.2  nextsync12.zip file. If you hit any setup issue with NextSync you may want to start by using his command line version of it (nextsync.py). Once nextsync12 is able to run and sync it should be the case as well of Next Sync in Py Hdfm Gooey since it based on the same code base as Jari python.
 * First time you start the tool if Hdfm Monkey is not present, the log Windows will throw an error message reporting it is missing (as expected). Either download &  install manual hdf monkey or use the Download and install button.
 * When using NextSync the console may show some “Timer” messages, these may be safely ignored.
+
+
 
 
 
