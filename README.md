@@ -2,6 +2,8 @@ Py-Hdfm-Gooey by Julien Clauzel based on HDFM-GOOEY - by em00k & based on NextSy
 
 This project is licensed under the terms of the MIT license.
 
+"Setup & How to" video avaible at: https://youtu.be/FJG-Z0DCIjQ
+
 Py-Hdfm-Gooey provides a cross platform (Windows, Linux, MacOS) Graphical Interface that unites two great tools in a single utility: Hdfm-Gooey & Next Sync. 
 * The former is mostly targeted at CSpect emulator users, and it provides a simple to use frontend interface to transfer content to an image and start the Spectrum Next emulator. 
 * The latter allows hardware owners such as Kick Starter & Clones that has a Wifi/ESP module to synchronize content directly from a machine over the network to their Next machines.
@@ -63,6 +65,7 @@ Other Mike CSpect sites and links:
 https://mdf200.itch.io/cspect
 https://dailly.blogspot.com/
 
+OpenAL sound library for CSpect: https://openal.org/
     
 HDF Monkey 
 ----------
