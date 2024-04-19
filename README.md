@@ -1,4 +1,7 @@
-Py-Hdfm-Gooey by Julien Clauzel based on HDFM-GOOEY - by em00k & based on NextSync by Jari Komppa
+Py-Hdfm-Gooey by Julien Clauzel based on:
+* HDFM-GOOEY by em00k
+    &
+* NextSync by Jari Komppa
 
 This project is licensed under the terms of the MIT license.
 
