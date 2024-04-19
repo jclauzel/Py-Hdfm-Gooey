@@ -46,7 +46,7 @@ Requirements
 
 * Install Python from: https://www.python.org/downloads/
   
-* Install pyside6 this is required for the UI to render the different controls being used:
+* Install pyside6 this is required for the UI to render the different controls being used. To install pyside6 open an elevated command shell and run:
 
     python -m pip install pyside6
 
@@ -54,6 +54,8 @@ Requirements
 
 start using it by running: 
     python py-hdfm-gooey.py
+    
+* On Windows download and install OpenAL sound library for CSpect: https://openal.org/
 
 CSpect 
 ----------
