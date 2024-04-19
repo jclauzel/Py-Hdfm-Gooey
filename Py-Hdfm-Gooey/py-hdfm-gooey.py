@@ -2,7 +2,11 @@
 #!/usr/bin/env python3
 
 """ 
-    Py-Hdfm-Gooey by Julien Clauzel based on HDFM-GOOEY - by em00k & based on NextSync by Jari Komppa
+    Py-Hdfm-Gooey by Julien Clauzel based on:
+    
+        HDFM-GOOEY by em00k
+    &
+        NextSync by Jari Komppa
 
     * Requirements: 
         - Python 3.7+
@@ -32,6 +36,8 @@
                If the above automated install is successful, you should then be able to select an image and navigate it.
                 
         On Mac/Linux you will need to install hdfmonkey manually based on the instructions for your platform that can be found at: https://github.com/gasman/hdfmonkey 
+        
+    * On Windows: OpenAL sound library is required for CSpect you may download it from here: https://openal.org/
     
     * On Mac/Linux: you will also need to install manualy mono-complete package for example using: sudo apt-get install mono-complete
         
@@ -50,15 +56,17 @@ import urllib.request
 import zipfile, traceback
 
 
-PY_HDFM_GOOEY_VERSION = "2.4"
+PY_HDFM_GOOEY_VERSION = "2.5"
 PY_HDFM_GOOEY_ICON_IMAGE_FILE = "py-hdfm-gooey.png"
 PY_HDFM_GOOEY_VERBOSE_LOG_MODE = False
-PY_HDFM_GOOEY_UI_WIDTH = 900
-PY_HDFM_GOOEY_UI_HEIGTH = 650
+PY_HDFM_GOOEY_UI_SIZE_MULTIPLIER = 1
+PY_HDFM_GOOEY_UI_WIDTH = 900 * PY_HDFM_GOOEY_UI_SIZE_MULTIPLIER 
+PY_HDFM_GOOEY_UI_HEIGTH = 650 * PY_HDFM_GOOEY_UI_SIZE_MULTIPLIER 
 PY_HDFM_GOOEY_CONFIG_FILE_NAME =  "hdfg.cfg"
 PY_HDFM_GOOEY_TAB_TITLE_GOOEY =  "HDFM Gooey"
 PY_HDFM_GOOEY_TAB_TITLE_NEXTSYNC = "NextSync"
 PY_HDFM_GOOEY_TAB_TITLE_NEXTSYNC_SYNCON = "NextSync - Sync ON"
+
 
 HDF_MONKEY_WINDOWS_URL = "https://uto.speccy.org/downloads/hdfmonkey_windows.zip"
 
@@ -76,6 +84,7 @@ SETTING_NEXTSYNC_EXPLORERPATH = "nextsync_explorerpath"
 SETTING_NEXTSYNC_SYNCONCE = "nextsync_synconce"
 SETTING_NEXTSYNC_ALWAYSSYNC = "nextsync_alwayssync"
 SETTING_NEXTSYNC_SLOWTRANSFER = "nextsync_slowtransfer"
+SETTING_DEFAULT_TAB_WHEN_OPENING = "default_tab"
 
 PORT = 2048    # Port to listen on (non-privileged ports are > 1023)
 VERSION3 = "NextSync3"
@@ -83,20 +92,29 @@ VERSION = "NextSync4"
 IGNOREFILE = "syncignore.txt"
 SYNCPOINT = "syncpoint.dat"
 MAX_PAYLOAD = 1024
-NEXTSYNC_UI_HEIGTH = 300
+NEXTSYNC_UI_HEIGTH_MULTIPLIER = 4
+NEXTSYNC_UI_HEIGTH = 300 * PY_HDFM_GOOEY_UI_SIZE_MULTIPLIER
 IGNOREFILE_DEFAULT_CONTENT = (("syncignore.txt"), ("syncpoint.dat"), ("py-hdfm-gooey.png"),("*.bak"), ("*.py"), ("*.pyproj"), ("*.pyproj"), ("hdfmonkey.exe"), ("hdfg.cfg"))
 
 INIT_LOG = (("NextSync - by Jari Komppa"), ("HDF Monkey - by Matt Westcott"), ("CSpect - by Mike Dailly http://cspect.org"), ("Inspired by HDFM-GOOEY - by em00k"), ("Py-Hdfm-Gooey - by Julien Clauzel 2024"))
 INIT_HELP = (("Welcome to Py Hdfm Gooey help"), 
              (""), 
-             ("History:"), 
+             ("Introduction:"), 
              ("--------"), 
-             ("Hdfm Gooey was oginaly created by emOOk back and NextSync by Jari Komppa."), 
-             ("A while back I came back with the idea of an all in one bootstrapper, transfer tool for the Next and that was the initial idea of the tool."), 
-             ("Last but not the least some source code was lost from HDFM Gooey and the tool was stuck back in that time, so with the agreement of emOOk I started a rewrite in Python that would also provide MacOS and Linux portability."), 
+             ("Hdfm Gooey was initialy created by emOOk and NextSync by Jari Komppa."), 
+             ("A while back I rambled with the idea of an all in one bootstrapper transfer tool to"), 
+             ("avoid manipulating SD cards for the Spectrum Next and that was the initial idea of it."), 
+             ("Last but not the least some source code was lost from HDFM Gooey and the tool was stuck back in that time,"),
+             ("with the agreement of emOOk I started a rewrite in Python and later with Jari"),
+             ("I started a rewrite in Python that would also provide MacOS and Linux portability."),
+             ("Here we are now you have it!"),
+             (""),
+             ("Setup & How to:"), 
+             ("---------------"),              
+             ("Checkout video avaible at: https://youtu.be/FJG-Z0DCIjQ"),
              (""),
              ("hdfmonkey:"), 
-             ("-------"),
+             ("----------"),
              ("Is a required external component developped by Matt Westcott  that allows to browse the image."),
              ("You will need to install it to get this application up and fully running."),
              (""),             
@@ -111,7 +129,7 @@ INIT_HELP = (("Welcome to Py Hdfm Gooey help"),
              ("On Mac/Linux you will need to install hdfmonkey manually based on the instructions for your platform that can be found at: https://github.com/gasman/hdfmonkey"),
              (""),             
              ("NextSync:"), 
-             ("-------"), 
+             ("---------"), 
              ("Py Hdfm Gooey implements the <Server> side code and protocol of NextSync by Jari Komppa."),
              ("It does not require any dot .sync modification and it uses the same very close python logic as nextsync.py."),
              (""),             
@@ -136,13 +154,19 @@ INIT_HELP = (("Welcome to Py Hdfm Gooey help"),
              (""),
              ("If you run in any type of issue using the NextSync integration please run first the Jari command line version to see if it works as expected."),
              (""),
+             ("OpenAL sound engine (on Windows)"),             
+             ("--------------------------------"),                 
+             ("OpenAL library is required on Windows for CSpect to play sound, you may download it here: https://openal.org/"),
+             (""),
              ("Mono (on Linux & MacOS Only)"),             
              ("-------"),              
-             ("You will also need to install manualy mono-complete package for example using: sudo apt-get install mono-complete"), 
+             ("You will also need to install manualy mono-complete package for example using: sudo apt-get install mono-complete"),
+             (""), 
              ("Enjoy!"),
              ("")
             )
-CONFIG_FILE_SETTINGS = (SETTING_HDDFILE, SETTING_EXPLORERPATH, SETTING_SCREENSIZE, SETTING_SOUND, SETTING_VSYNC, SETTING_HERTZ, SETTING_JOYSTICK, SETTING_CSPECT, SETTING_CUSTOM, SETTING_ESC, SETTING_NEXTSYNC_EXPLORERPATH, SETTING_NEXTSYNC_SYNCONCE, SETTING_NEXTSYNC_ALWAYSSYNC, SETTING_NEXTSYNC_SLOWTRANSFER)
+
+CONFIG_FILE_SETTINGS = (SETTING_HDDFILE, SETTING_EXPLORERPATH, SETTING_SCREENSIZE, SETTING_SOUND, SETTING_VSYNC, SETTING_HERTZ, SETTING_JOYSTICK, SETTING_CSPECT, SETTING_CUSTOM, SETTING_ESC, SETTING_NEXTSYNC_EXPLORERPATH, SETTING_NEXTSYNC_SYNCONCE, SETTING_NEXTSYNC_ALWAYSSYNC, SETTING_NEXTSYNC_SLOWTRANSFER, SETTING_DEFAULT_TAB_WHEN_OPENING)
 IMAGE_BUTTONS_SIZE = 190
 DISK_ARROWS_BUTTONS_SIZE = 30
 
@@ -162,37 +186,16 @@ DIRECTORY_CREATION_NOT_ALLOWED_CHARACTERS = ('"', '<', '>', ':', '\\', '/', '|',
 HDFMONKEY_EXECUTABLE = "hdfmonkey"
 FILTER_LABEL_TEXT = "Filter: "
 FILTER_TEXT_WIDTH = 320
-# NextSync static variables
-
 
 
 assert sys.version_info >= (3, 6) # We need 3.6 for f"" strings.
 
 class WorkerSignals(QObject):
-    '''
-    Defines the signals available from a running worker thread.
 
-    Supported signals are:
-
-    finished
-        No data
-
-    error
-        tuple (exctype, value, traceback.format_exc() )
-
-    result
-        object data returned from processing, anything
-
-    progress
-        int indicating % progress
-
-    '''
     finished = Signal()
     error = Signal(tuple)
     result = Signal(object)
     progress = Signal(int)
-
-
 
 
 class MainWindow(QMainWindow):
@@ -218,18 +221,6 @@ class MainWindow(QMainWindow):
         self.threadpool = QThreadPool()
         
         class Worker(QRunnable):
-            '''
-            Worker thread
-
-            Inherits from QRunnable to handler worker thread setup, signals and wrap-up.
-
-            :param callback: The function callback to run on this worker thread. Supplied args and
-                             kwargs will be passed through to the runner.
-            :type callback: function
-            :param args: Arguments to pass to the callback function
-            :param kwargs: Keywords to pass to the callback function
-
-            '''
 
             def __init__(self, fn, *args, **kwargs):
                 super(Worker, self).__init__()
@@ -391,6 +382,10 @@ class MainWindow(QMainWindow):
             self.button_delete_files.setVisible(False)
             
         
+        # def tab_changed():
+        #     # Do nothing for now has this event happens before rendering the tab
+        #     # get_pyhdfmgooey_currenttab_config()
+
         def load_configuration_file():
             
             try:
@@ -414,7 +409,7 @@ class MainWindow(QMainWindow):
 
                         
                 
-                #  Now set the settings back to the application SETTING_SCREENSIZE
+                #  Now set the settings back to the application SETTING_SCREENSIZE and others
 
                 self.imageinput.setText(configuration_dictionary[SETTING_HDDFILE])
                 self.cspect_sound.setCurrentIndex(get_int_value(configuration_dictionary[SETTING_SOUND]))
@@ -422,6 +417,11 @@ class MainWindow(QMainWindow):
                 self.cspect_vsync.setCurrentIndex(get_int_value(configuration_dictionary[SETTING_VSYNC]))
                 self.cspect_joystick.setCurrentIndex(get_int_value(configuration_dictionary[SETTING_JOYSTICK]))
                 self.cspect_frequency.setCurrentIndex(get_int_value(configuration_dictionary[SETTING_HERTZ]))
+                
+                if configuration_dictionary[SETTING_DEFAULT_TAB_WHEN_OPENING]== "":
+                    configuration_dictionary[SETTING_DEFAULT_TAB_WHEN_OPENING] = 0  
+                    
+                wid_inner.tab.setCurrentIndex(get_int_value(configuration_dictionary[SETTING_DEFAULT_TAB_WHEN_OPENING]))
                 
                 if configuration_dictionary[SETTING_EXPLORERPATH] != "":
                     if not os.path.isdir(configuration_dictionary[SETTING_EXPLORERPATH]):
@@ -481,6 +481,8 @@ class MainWindow(QMainWindow):
 
         def save_configuration_file():
             
+            get_pyhdfmgooey_currenttab_config()
+            
             try:
                 config_file = open(PY_HDFM_GOOEY_CONFIG_FILE_NAME, "w")
                 config_array = [];   
@@ -500,7 +502,11 @@ class MainWindow(QMainWindow):
                 return True
             else:
                 return False  
-       
+            
+        def get_pyhdfmgooey_currenttab_config():      
+            configuration_dictionary[SETTING_DEFAULT_TAB_WHEN_OPENING] = wid_inner.tab.currentIndex()
+            #save_configuration_file()           
+
         def set_cspect_screen_size():
             configuration_dictionary[SETTING_SCREENSIZE] = self.cspect_screensize.currentIndex()
             save_configuration_file()
@@ -700,6 +706,8 @@ class MainWindow(QMainWindow):
                 self.button_create_directory_cancel.setVisible(True)
             else:
                 add_main_log_window("Please load an image file first !")
+            
+            save_configuration_file()    
                 
         def image_newfolder_cancel():
             
@@ -714,6 +722,8 @@ class MainWindow(QMainWindow):
                 self.button_create_directory_cancel.setVisible(False)
             else:
                 add_main_log_window("Please load an image file first !")
+
+            save_configuration_file()
 
         def image_newfolder_create():
 
@@ -1004,6 +1014,7 @@ class MainWindow(QMainWindow):
 
         def nextsync_perform_checks_and_prepare_server_start():
             nextsync_warnings()
+            save_configuration_file()
 
 
         def nextsync_start_server():
@@ -1139,6 +1150,7 @@ class MainWindow(QMainWindow):
         def nextsync_create_syncingore_button():
             nextsync_create_sample_ignorefile(nextsync_get_fileexplorer_root_selection() + IGNOREFILE)
             nextsync_show_sync_buttons_based_on_fileexplorer_content_selection()
+            save_configuration_file()
 
         def nextsync_delete_syncingore_button():
             try:
@@ -1147,6 +1159,7 @@ class MainWindow(QMainWindow):
                 add_nextsync_log_window("Failed deleting:" + str(nextsync_get_fileexplorer_root_selection() + IGNOREFILE) + " Exception:" + str(e))   
                 
             nextsync_show_sync_buttons_based_on_fileexplorer_content_selection()
+            save_configuration_file()
             
         def nextsync_delete_syncpoint_button():
             try:
@@ -1604,7 +1617,8 @@ class MainWindow(QMainWindow):
                 severity = "Warning"
             else:
                 severity = "WARNING"
-            add_nextsync_log_window (severity + ": Ready to sync " + str(len(initial)) +" files, " + str(total/1024) +" kilobytes.")
+            #add_nextsync_log_window (severity + ": Ready to sync " + str(len(initial)) +" files, " + str(total/1024) +" kilobytes.")
+            add_nextsync_log_window (f"{severity}: Ready to sync {len(initial)} files, {total/1024:.2f} kilobytes.")
             add_nextsync_log_window ("")
             
             
@@ -1635,6 +1649,7 @@ class MainWindow(QMainWindow):
         def nextsync_cancel_server_job():
             nextsync_hide_start_cancel_buttons()
             self.nextsync_prepare_server.setVisible(True)
+            save_configuration_file()
             
         def nextsync_do_server_job(progress_callback):
 
@@ -1677,8 +1692,8 @@ class MainWindow(QMainWindow):
     
             working = True
             while working:
-                add_nextsync_log_window (str(timestamp()) +  " | NextSync listening to port " + str(PORT))
-                add_nextsync_log_window (str(timestamp()) +  " | Now start run .sync command on your Next!" )
+                add_nextsync_log_window (f"{timestamp()} | NextSync listening to port {PORT}")
+                add_nextsync_log_window (f"{timestamp()} | Now start run .sync (or .syncfast) command on your Next!" )
                 totalbytes = 0
                 payloadbytes = 0
                 starttime = 0
@@ -1693,7 +1708,7 @@ class MainWindow(QMainWindow):
                     # Make sure *nixes close the socket when we ask it to.
                     conn.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack('ii', 1, 0))
                     f = getFileList(selected_nextsync_explorer_sync_root_directory)
-                    add_nextsync_log_window (str(timestamp()) + " | Sync file list has " + str(len(f)) + " files.")
+                    add_nextsync_log_window (f'{timestamp()} | Sync file list has {len(f)} files.')
                     knownfiles = []
                     if os.path.isfile(selected_nextsync_explorer_sync_root_directory + SYNCPOINT):
                         with open(selected_nextsync_explorer_sync_root_directory + SYNCPOINT) as kf:
@@ -1707,7 +1722,7 @@ class MainWindow(QMainWindow):
                     starttime = time.time()
                     endtime = starttime
                     with conn:                
-                        add_nextsync_log_window (str(timestamp()) + " | Connected by " + str(addr[0]) +" port " + str(addr[1]))
+                        add_nextsync_log_window (f'{timestamp()} | Connected by {addr[0]} port {addr[1]}')
                         talking = True                
                         while talking:
                             data = conn.recv(1024)
@@ -1715,9 +1730,9 @@ class MainWindow(QMainWindow):
                                 break
                             decoded = data.decode()
                             if PY_HDFM_GOOEY_VERBOSE_LOG_MODE:
-                                add_nextsync_log_window (str(timestamp()) + " | Data received: " + str(decoded) + ", " + str(len(decoded))+ " bytes")
+                                add_nextsync_log_window (f'{timestamp()} | Data received: "{decoded}", {len(decoded)} bytes')
                             if data == b"Sync3":
-                                add_nextsync_log_window (str(timestamp()) + " | Sending " + VERSION3)
+                                add_nextsync_log_window (f'{timestamp()} | Using protocol version: {VERSION3}')
                                 packet = str.encode(VERSION3)
                                 sendpacket(conn, packet, 0)
                                 packets += 1
@@ -1726,7 +1741,7 @@ class MainWindow(QMainWindow):
                                 if data == b"Neex":
                                     gee += 1
                                 if fn >= len(f):
-                                    add_nextsync_log_window (str(timestamp()) + " | Nothing (more) to sync")
+                                    add_nextsync_log_window (f"{timestamp()} | Nothing (more) to sync")
                                     packet = b'\x00\x00\x00\x00\x00' # end of.
                                     packets += 1
                                     sendpacket(conn, packet, 0)
@@ -1735,7 +1750,7 @@ class MainWindow(QMainWindow):
                                     update_syncpoint(selected_nextsync_explorer_sync_root_directory, knownfiles)
                                 else:
                                     specfn = f[fn][0].replace('\\','/')
-                                    add_nextsync_log_window (str(timestamp()) + " | File: " +str(f[fn][0]) + " (as " +str(specfn)+") length: " + str(f[fn][1]) + " bytes")
+                                    add_nextsync_log_window (f"{timestamp()} | File: {f[fn][0]} (as {specfn}) length: {f[fn][1]} bytes")
                                     packet = (f[fn][1]).to_bytes(4, byteorder="big") + (len(specfn)).to_bytes(1, byteorder="big") + (specfn).encode()
                                     packets += 1
                                     sendpacket(conn, packet, 0)
@@ -1756,9 +1771,9 @@ class MainWindow(QMainWindow):
                                 packet = filedata[fileofs:fileofs+bytecount]
                                 if PY_HDFM_GOOEY_VERBOSE_LOG_MODE:
                                     if len(filedata) != 0:
-                                        add_nextsync_log_window (str(timestamp()) + " | Sending " + str(bytecount) + " bytes, offset " + str(fileofs/len(filedata)))
+                                        add_nextsync_log_window (f"{timestamp()} | Sending {bytecount} bytes, offset {fileofs}/{len(filedata)}")
                                     else:
-                                        add_nextsync_log_window (str(timestamp()) + " | Sending " + str(bytecount) + " bytes 0 bytes")
+                                        add_nextsync_log_window (f"{timestamp()} | Sending {bytecount} bytes 0 bytes")
                                     
                                 packets += 1
                                 sendpacket(conn, packet, packetno)
@@ -1769,35 +1784,34 @@ class MainWindow(QMainWindow):
                                     gee += 1
                             elif data == b"Retry":
                                 retries += 1
-                                add_nextsync_log_window (str(timestamp()) + " | Resending")
+                                add_nextsync_log_window (f"{timestamp()} | Resending")
                                 sendpacket(conn, packet, packetno - 1)
                             elif data == b"Restart":
                                 restarts += 1
-                                add_nextsync_log_window (str(timestamp()) + " | Restarting")
+                                add_nextsync_log_window (f"{timestamp()} | Restarting")
                                 fileofs = 0
                                 packetno = 0
                                 sendpacket(conn, str.encode("Back"), 0)
                             elif data == b"Bye":
                                 sendpacket(conn, str.encode("Later"), 0)
-                                add_nextsync_log_window (str(timestamp()) + " | Closing connection")
+                                add_nextsync_log_window (f"{timestamp()} | Closing connection")
                                 talking = False
                             elif data == b"Sync2" or data == b"Sync1" or data == b"Sync":
                                 packet = str.encode("Nextsync 0.8 or later needed")
-                                add_nextsync_log_window (str(timestamp()) + " | Old version requested")
+                                add_nextsync_log_window (f'{timestamp()} | Old protocol version requested')
                                 sendpacket(conn, packet, 0)
                                 packets += 1
                                 totalbytes += len(packet)
                             else:
-                                add_nextsync_log_window (str(timestamp()) + "  | Unknown command")
+                                add_nextsync_log_window (f"{timestamp()} | Unknown command")
                                 sendpacket(conn, str.encode("Error"), 0)
                         endtime = time.time()
                 deltatime = endtime - starttime
-                add_nextsync_log_window (str(timestamp()) + " | " + str(totalbytes/1024) + " kilobytes transferred in " + str(deltatime) + " seconds, " + str((totalbytes/deltatime)/1024) + " kBps")
-                
-                #TODO set content propoerly                
-                add_nextsync_log_window (str(timestamp()) + " | " + str(payloadbytes/1024) + " kilobytes payload, " + str((payloadbytes/deltatime)/1024) + " kBps effective speed")
-                add_nextsync_log_window (str(timestamp()) + " | packets: " + str(packets) + ", retries: " + str(retries) + ", restarts: " + str(restarts) + ", gee: " + str(gee))
-                add_nextsync_log_window (str(timestamp()) + " | Disconnected")
+                add_nextsync_log_window (f"{timestamp()} | {totalbytes/1024:.2f} kilobytes transferred in {deltatime:.2f} seconds, {(totalbytes/deltatime)/1024:.2f} kBps")
+                add_nextsync_log_window (f"{timestamp()} | {payloadbytes/1024:.2f} kilobytes payload, {(payloadbytes/deltatime)/1024:.2f} kBps effective speed")
+                add_nextsync_log_window (f"{timestamp()} | packets: {packets}, retries: {retries}, restarts: {restarts}, gee: {gee}")                
+
+                add_nextsync_log_window (f"{timestamp()} | Disconnected")
                 add_nextsync_log_window ("")                 
                 if self.nextsync_synconce_checkbox.isChecked():
                     working = False
@@ -1822,7 +1836,7 @@ class MainWindow(QMainWindow):
         #  Build Main UI
 
         self.setWindowTitle("Py-Hdfm-Gooey " + PY_HDFM_GOOEY_VERSION)
-        self.setFixedSize(QSize(PY_HDFM_GOOEY_UI_WIDTH, PY_HDFM_GOOEY_UI_HEIGTH))
+        self.setMinimumSize(QSize(PY_HDFM_GOOEY_UI_WIDTH, PY_HDFM_GOOEY_UI_HEIGTH))
         
         # Initialize configuration dictonnary
         for c in CONFIG_FILE_SETTINGS:
@@ -1831,6 +1845,7 @@ class MainWindow(QMainWindow):
         # Init UI forms
 
         self.setWindowIcon(QIcon(PY_HDFM_GOOEY_ICON_IMAGE_FILE))
+        
 
         self.hdfm_gooey_form = QFormLayout()
         self.nextsync_form = QFormLayout()
@@ -1908,7 +1923,7 @@ class MainWindow(QMainWindow):
         self.diskimageexplorerlabelpath.setText("")
         
         self.diskimageexplorerlabelpath.setMinimumWidth(400)
-        self.diskimageexplorerlabelpath.setMaximumWidth(400)
+        #self.diskimageexplorerlabelpath.setMaximumWidth(400)
         
         self.horizontal2.addWidget(self.diskimageexplorerlabelpath)
 
@@ -1972,8 +1987,9 @@ class MainWindow(QMainWindow):
 
         
         self.listWidgetLog.setMinimumHeight(120)
-        self.listWidgetLog.setMaximumHeight(120)
-        self.listWidgetLog.setMinimumWidth(410)
+        self.listWidgetLog.setMaximumHeight(160)
+        # self.listWidgetLog.setMinimumWidth(410)
+        # self.listWidgetLog.setMaximumWidth(410)
         
         self.imageexplorerbuttonscontainer = QWidget()
         self.imageexplorerbuttons = QHBoxLayout()
@@ -2274,7 +2290,7 @@ class MainWindow(QMainWindow):
 
         self.nextsync_log = QListWidget(self)
         self.nextsync_log.setMinimumHeight(NEXTSYNC_UI_HEIGTH)
-        self.nextsync_log.setMaximumHeight(NEXTSYNC_UI_HEIGTH)
+        #self.nextsync_log.setMaximumHeight(NEXTSYNC_UI_HEIGTH)
         
         self.nextsync_container_log_and_sync_buttons.addWidget(self.nextsync_log)
         
@@ -2365,6 +2381,9 @@ class MainWindow(QMainWindow):
         grid_tab_Help.addWidget(self.listWidgetHelp) # TODO as above use the form container of Help use the form container
         hdfm_Help_tab.setLayout(grid_tab_Help)
         wid_inner.tab.addTab(hdfm_Help_tab, "?")
+        
+        #wid_inner.tab.tabBarClicked.connect(tab_changed)
+        
 
         #  Start main logic
 
