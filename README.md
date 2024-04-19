@@ -5,7 +5,10 @@ Py-Hdfm-Gooey by Julien Clauzel based on:
 
 This project is licensed under the terms of the MIT license.
 
-"Setup & How to" video avaible at: https://youtu.be/FJG-Z0DCIjQ
+Videos:
+* "Setup & How to" video avaible at: https://youtu.be/FJG-Z0DCIjQ
+* PY Hdfm Gooey NextSync Head Over Heels: https://www.youtube.com/watch?v=D3_WqTPvjOE
+* Py Hdfm Gooey - NextSync - Night Knight: https://www.youtube.com/watch?v=eN1eMIqMCm4&t=12s
 
 Py-Hdfm-Gooey provides a cross platform (Windows, Linux, MacOS) Graphical Interface that unites two great tools in a single utility: Hdfm-Gooey & Next Sync. 
 * The former is mostly targeted at CSpect emulator users, and it provides a simple to use frontend interface to transfer content to an image and start the Spectrum Next emulator. 
