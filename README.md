@@ -6,7 +6,7 @@ Py-Hdfm-Gooey by Julien Clauzel based on:
 This project is licensed under the terms of the MIT license.
 
 Videos:
-* "Setup & How to" video avaible at: https://youtu.be/FJG-Z0DCIjQ
+* "Setup & How to": https://youtu.be/FJG-Z0DCIjQ
 * Py Hdfm Gooey NextSync Head Over Heels: https://www.youtube.com/watch?v=D3_WqTPvjOE
 * Py Hdfm Gooey - NextSync - Night Knight: https://www.youtube.com/watch?v=eN1eMIqMCm4&t=12s
 
