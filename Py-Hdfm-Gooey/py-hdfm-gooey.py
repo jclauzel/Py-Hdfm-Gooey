@@ -56,15 +56,15 @@ import urllib.request
 import zipfile, traceback
 
 
-PY_HDFM_GOOEY_VERSION = "2.5"
+PY_HDFM_GOOEY_VERSION = "2.6"
 PY_HDFM_GOOEY_ICON_IMAGE_FILE = "py-hdfm-gooey.png"
 PY_HDFM_GOOEY_VERBOSE_LOG_MODE = False
 PY_HDFM_GOOEY_UI_SIZE_MULTIPLIER = 1
 PY_HDFM_GOOEY_UI_WIDTH = 900 * PY_HDFM_GOOEY_UI_SIZE_MULTIPLIER 
 PY_HDFM_GOOEY_UI_HEIGTH = 650 * PY_HDFM_GOOEY_UI_SIZE_MULTIPLIER 
 PY_HDFM_GOOEY_CONFIG_FILE_NAME =  "hdfg.cfg"
-PY_HDFM_GOOEY_TAB_TITLE_GOOEY =  "HDFM Gooey"
-PY_HDFM_GOOEY_TAB_TITLE_NEXTSYNC = "NextSync"
+PY_HDFM_GOOEY_TAB_TITLE_GOOEY =  "Hdfm Gooey - SD Card Utility"
+PY_HDFM_GOOEY_TAB_TITLE_NEXTSYNC = "NextSync - Network Transfer Manager"
 PY_HDFM_GOOEY_TAB_TITLE_NEXTSYNC_SYNCON = "NextSync - Sync ON"
 
 
@@ -92,7 +92,7 @@ VERSION = "NextSync4"
 IGNOREFILE = "syncignore.txt"
 SYNCPOINT = "syncpoint.dat"
 MAX_PAYLOAD = 1024
-NEXTSYNC_UI_HEIGTH_MULTIPLIER = 4
+NEXTSYNC_UI_HEIGTH_MULTIPLIER = 1
 NEXTSYNC_UI_HEIGTH = 300 * PY_HDFM_GOOEY_UI_SIZE_MULTIPLIER
 IGNOREFILE_DEFAULT_CONTENT = (("syncignore.txt"), ("syncpoint.dat"), ("py-hdfm-gooey.png"),("*.bak"), ("*.py"), ("*.pyproj"), ("*.pyproj"), ("hdfmonkey.exe"), ("hdfg.cfg"))
 
@@ -111,7 +111,9 @@ INIT_HELP = (("Welcome to Py Hdfm Gooey help"),
              (""),
              ("Setup & How to:"), 
              ("---------------"),              
-             ("Checkout video avaible at: https://youtu.be/FJG-Z0DCIjQ"),
+             ("Checkout main setup & demo video avaible at: https://youtu.be/FJG-Z0DCIjQ"),
+             ("NextSync Head Over Heels demo: https://www.youtube.com/watch?v=D3_WqTPvjOE"),
+             ("NextSync Night Knight demo: https://www.youtube.com/watch?v=eN1eMIqMCm4"),
              (""),
              ("hdfmonkey:"), 
              ("----------"),
@@ -2316,7 +2318,7 @@ class MainWindow(QMainWindow):
         
  
         self.nextsync_prepare_server = QPushButton("Prepare Server", self)
-        self.nextsync_prepare_server.setText("Prepare NextSync server")
+        self.nextsync_prepare_server.setText("Prepare NextSync network server")
         self.nextsync_prepare_server.clicked.connect(nextsync_perform_checks_and_prepare_server_start)
 
         self.nextsync_container_log_and_sync_buttons.addWidget(self.nextsync_prepare_server)
