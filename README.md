@@ -56,6 +56,8 @@ Requirements
 
     python -m pip install pyside6
 
+    Note: On a regular basis you may want to update the pyside6 library running:  pip install --upgrade PySide6
+
 * Copy Cspect (with the Spectrum Next roms) and hdfmonkey in the same directory (see above). 
 
 start using it by running: 
