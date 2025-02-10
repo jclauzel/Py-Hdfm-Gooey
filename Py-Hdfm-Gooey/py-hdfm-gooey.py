@@ -54,9 +54,10 @@ from PySide6.QtGui import QIcon, QColor
 from PySide6.QtWidgets import QApplication, QComboBox, QDialogButtonBox, QLabel, QMainWindow, QPushButton, QTableWidget, QVBoxLayout, QWidget, QFileSystemModel, QTreeView, QFormLayout, QHBoxLayout, QLineEdit, QListWidgetItem, QListWidget, QFileDialog, QTableWidgetItem, QAbstractItemView, QDialog, QGridLayout, QTabWidget, QProgressBar, QCheckBox
 import urllib.request
 import zipfile, traceback
+import logging
 
 
-PY_HDFM_GOOEY_VERSION = "2.6"
+PY_HDFM_GOOEY_VERSION = "2.7"
 PY_HDFM_GOOEY_ICON_IMAGE_FILE = "py-hdfm-gooey.png"
 PY_HDFM_GOOEY_VERBOSE_LOG_MODE = False
 PY_HDFM_GOOEY_UI_SIZE_MULTIPLIER = 1
@@ -97,7 +98,7 @@ NEXTSYNC_UI_HEIGTH = 300 * PY_HDFM_GOOEY_UI_SIZE_MULTIPLIER
 IGNOREFILE_DEFAULT_CONTENT = (("syncignore.txt"), ("syncpoint.dat"), ("py-hdfm-gooey.png"),("*.bak"), ("*.py"), ("*.pyproj"), ("*.pyproj"), ("hdfmonkey.exe"), ("hdfg.cfg"))
 
 INIT_LOG = (("NextSync - by Jari Komppa"), ("HDF Monkey - by Matt Westcott"), ("CSpect - by Mike Dailly http://cspect.org"), ("Inspired by HDFM-GOOEY - by em00k"), ("Py-Hdfm-Gooey - by Julien Clauzel 2024"))
-INIT_HELP = (("Welcome to Py Hdfm Gooey help"), 
+INIT_HELP = ((f"Welcome to Py Hdfm Gooey {PY_HDFM_GOOEY_VERSION} help"), 
              (""), 
              ("Introduction:"), 
              ("--------"), 
@@ -191,6 +192,9 @@ FILTER_TEXT_WIDTH = 320
 
 
 assert sys.version_info >= (3, 6) # We need 3.6 for f"" strings.
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class WorkerSignals(QObject):
 
@@ -393,23 +397,17 @@ class MainWindow(QMainWindow):
             try:
                 
                 # Load configuration dictionary
-                config_file = open(PY_HDFM_GOOEY_CONFIG_FILE_NAME, "r")
-                content = config_file.readlines()
-                
-                for line in content:
-                    setting = line.split("=")
-                    config_setting_name = setting[0].strip()
-                    config_setting_value= setting[1].strip()
-                    
-                    for cs in CONFIG_FILE_SETTINGS:
-                        if cs == config_setting_name:
-                            configuration_dictionary[cs] = config_setting_value
-                            break
-                
-                config_file.close()
 
+                with open(PY_HDFM_GOOEY_CONFIG_FILE_NAME, "r") as config_file:
+                    for line in config_file:
+                        config_setting_name, config_setting_value = line.strip().split('=')
+                        configuration_dictionary[config_setting_name] = config_setting_value
 
-                        
+                        for cs in CONFIG_FILE_SETTINGS:
+                            if cs == config_setting_name:
+                                configuration_dictionary[cs] = config_setting_value
+                                break
+
                 
                 #  Now set the settings back to the application SETTING_SCREENSIZE and others
 
@@ -475,9 +473,21 @@ class MainWindow(QMainWindow):
                                 
                         
                 add_main_log_window("Loaded configuration file.")
+                logging.info("Configuration file saved successfully.")
 
                 return True
-            
+            except ValueError as e:
+                logging.error(f"Error parsing the configuration file. Value error: {e}")
+                return False
+            except IOError as e:
+                logging.error(f"Failed to load configuration file. IOError: {e}")
+                return False
+            except FileNotFoundError:
+                logging.error(f"Configuration file not found!")
+                return False
+            except Exception as e:
+                logging.error(f"Failed to load configuration file. Exception: {e}")
+                return False
             except:
                 return False
 
@@ -486,18 +496,25 @@ class MainWindow(QMainWindow):
             get_pyhdfmgooey_currenttab_config()
             
             try:
-                config_file = open(PY_HDFM_GOOEY_CONFIG_FILE_NAME, "w")
-                config_array = [];   
-                for cs in CONFIG_FILE_SETTINGS:
-                    config_array.append(cs + "=" + str(configuration_dictionary[cs]) + '\n') 
 
-                config_file.writelines(config_array)
-                config_file.close()
+                config_array = [];
+                with open(PY_HDFM_GOOEY_CONFIG_FILE_NAME, "w") as config_file:
+                    for cs in CONFIG_FILE_SETTINGS:
+                        config_array.append(cs + "=" + str(configuration_dictionary[cs]) + '\n')
+
+                    config_file.writelines(config_array)
+
                 if PY_HDFM_GOOEY_VERBOSE_LOG_MODE:
+                    logging.info("Configuration file saved successfully.")
                     add_main_log_window("Saved configuration file.")
+ 
                     
+            except IOError as e:
+                logging.error(f"Failed to save configuration file with IOError: {e}")
+                add_main_log_window(f"Failed to save configuration file with IOError: {e}")
             except Exception as e:
-                add_main_log_window("Failed saving configuration file. Exception:" + str(e))
+                logging.error(f"An unexpected error occurred while saving the configuration file. Exception: {e}")
+                add_main_log_window(f"An unexpected error occurred while saving the configuration file. Exception: {e}")
 
         def is_filetype_a_directory(file_type:str):
             if file_type == "b'[DIR]" or file_type == 'b"[DIR]':
@@ -562,7 +579,8 @@ class MainWindow(QMainWindow):
             
                 cspect_arguments += " -mmc=" + self.right_disk_image_path + " "
 
-                print (f"Cspect start with arguments: {cspect_arguments}")
+                logging.info(f"Cspect start with arguments: {cspect_arguments}")
+
                 add_main_log_window("CSpect start: " + "CSpect.exe" + cspect_arguments)
                 try:
                     if platform.system() == "Windows":
@@ -1032,7 +1050,7 @@ class MainWindow(QMainWindow):
                 nextsync_hide_start_cancel_buttons()
 
             except Exception as ex:
-                print (str(ex))           
+                logging.error(f"An unexpected error occurred while starting nextsync server. Exception: {ex}")          
        
         # Copies the selected file to image
         def on_treeview_clicked():
