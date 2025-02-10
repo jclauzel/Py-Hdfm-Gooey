@@ -46,8 +46,7 @@
         
 """
 
-
-
+from math import log
 import sys, os, string, subprocess, platform, datetime, fnmatch, socket, struct, time, glob
 from PySide6.QtCore import QSize, Qt, QSortFilterProxyModel, QModelIndex, QDir, QRunnable, Slot, Signal, QObject, QThreadPool, QRect
 from PySide6.QtGui import QIcon, QColor
@@ -56,8 +55,7 @@ import urllib.request
 import zipfile, traceback
 import logging
 
-
-PY_HDFM_GOOEY_VERSION = "2.7"
+PY_HDFM_GOOEY_VERSION = "2.8"
 PY_HDFM_GOOEY_ICON_IMAGE_FILE = "py-hdfm-gooey.png"
 PY_HDFM_GOOEY_VERBOSE_LOG_MODE = False
 PY_HDFM_GOOEY_UI_SIZE_MULTIPLIER = 1
@@ -250,6 +248,7 @@ class MainWindow(QMainWindow):
                 try:
                     result = self.fn(*self.args, **self.kwargs)
                 except:
+                    logging.error(f"An error occurred in Worker.run: {sys.exc_info()}")
                     traceback.print_exc()
                     exctype, value = sys.exc_info()[:2]
                     self.signals.error.emit((exctype, value, traceback.format_exc()))
@@ -259,20 +258,25 @@ class MainWindow(QMainWindow):
                     self.signals.finished.emit()  # Done        
         
         def get_tuple_value(tuple_type, text_value):
-            for v in tuple_type:
-                if v[0] == text_value:
-                    return v[1]
-        
-        def get_int_value(str_value:str):
-            
+            if not tuple_type:  # empty tuple
+                return None
+
             try:
-                value = int(str_value)
-                return value
-            except:
+                index = next(i for i, v in enumerate(tuple_type) if v == text_value)
+                return tuple_type[index]
+            except StopIteration:
+                return None  # value not found
+        
+        def get_int_value(str_value: str):
+            if str_value == "" or str_value == None:
+                return 0
+            try:
+                return int(str_value)
+            except ValueError:
+                logging.error(f"Invalid integer value in get_int_value: {str_value}")
                 return 0
 
         def progress_fn(n):
-                # print("%d%% done" % n)
                 # add_nextsync_log_window ("Progress: " + str(n))
                 self.nextsync_progressbar.setValue(n)
 
@@ -284,7 +288,7 @@ class MainWindow(QMainWindow):
         #     return "Done."
 
         # def print_output(s):
-        #     print(s)
+        #     logging.info(s)
 
         def thread_complete():
             add_nextsync_log_window("Sync Complete!")
@@ -370,6 +374,7 @@ class MainWindow(QMainWindow):
                 self.button_new_folder.setVisible(True)
                 self.button_delete_files.setVisible(True) 
                 self.download_and_install_hdfmonkey_button.setVisible(False)
+                logging.info("Successfully installed hdfmonkey.")
                 add_main_log_window("Successfully installed hdfmonkey.")
                 
                 if is_hdfmonkey_present():
@@ -377,8 +382,9 @@ class MainWindow(QMainWindow):
                     set_all_buttons_enabled()
                     
                 return True
-            except Exception as ex:
-                add_main_log_window("Failed downloading & installing hdfmonkey: " + str(ex))
+            except Exception as e:
+                logging.error(f"Failed downloading & installing hdfmonkey: {e}")
+                add_main_log_window(f"Failed downloading & installing hdfmonkey: {e}")
                 #set_all_buttons_enabled()
                 return False
     
@@ -394,9 +400,12 @@ class MainWindow(QMainWindow):
 
         def load_configuration_file():
             
+            config_loaded_with_success = False
+
             try:
                 
                 # Load configuration dictionary
+                pass
 
                 with open(PY_HDFM_GOOEY_CONFIG_FILE_NAME, "r") as config_file:
                     for line in config_file:
@@ -471,25 +480,22 @@ class MainWindow(QMainWindow):
                     else:
                         self.nextsync_slowtransfer_checkbox.setChecked(False)
                                 
-                        
+                config_loaded_with_success = True        
                 add_main_log_window("Loaded configuration file.")
-                logging.info("Configuration file saved successfully.")
+                logging.info("Configuration file loaded successfully.")
 
-                return True
             except ValueError as e:
                 logging.error(f"Error parsing the configuration file. Value error: {e}")
-                return False
             except IOError as e:
                 logging.error(f"Failed to load configuration file. IOError: {e}")
-                return False
             except FileNotFoundError:
                 logging.error(f"Configuration file not found!")
-                return False
             except Exception as e:
                 logging.error(f"Failed to load configuration file. Exception: {e}")
-                return False
-            except:
-                return False
+
+            finally:
+                return config_loaded_with_success
+
 
         def save_configuration_file():
             
@@ -580,8 +586,8 @@ class MainWindow(QMainWindow):
                 cspect_arguments += " -mmc=" + self.right_disk_image_path + " "
 
                 logging.info(f"Cspect start with arguments: {cspect_arguments}")
+                add_main_log_window(f"Cspect start with arguments: {cspect_arguments}")
 
-                add_main_log_window("CSpect start: " + "CSpect.exe" + cspect_arguments)
                 try:
                     if platform.system() == "Windows":
                         execute_shell_command ("CSpect.exe", cspect_arguments)
@@ -590,12 +596,15 @@ class MainWindow(QMainWindow):
                         execute_shell_command ("mono CSpect.exe", cspect_arguments)
                 except subprocess.CalledProcessError as ex:
                     if ex.returncode == 1:
+                        logging.error("CSpect.exe is not present in the same local directory as Py Hdfm Gooey.Please install it from http://cspect.org")
                         add_main_log_window("ERROR: CSpect.exe is not present in the same local directory as Py Hdfm Gooey.Please install it from http://cspect.org")
                     else:
-                        add_main_log_window("ERROR: Unknown shell execute error: " + str(ex.returncode) + " - :" + str(ex))
+                        logging.error(f"ERROR: Unknown shell execute error: {ex.returncode} - :{ex}")
+                        add_main_log_window(f"ERROR: Unknown shell execute error: {ex.returncode} - :{ex}")
                                                 
                     if platform.system() != "Windows":
-                        add_main_log_window("On MacOS and Linux mono is required as it runs under it. Please make sure mono ")
+                        logging.error("On MacOS and Linux mono is required as it runs under it. Please make sure mono is installed.")
+                        add_main_log_window("On MacOS and Linux mono is required as it runs under it. Please make sure mono is installed.")
                     
                 set_all_buttons_enabled()
                 
@@ -632,8 +641,9 @@ class MainWindow(QMainWindow):
                         return False
                     else:
                         return True
-            except Exception as ex:
-                add_main_log_window("Failed executing hdfmonkey, please make sure it is installed in the same local directory as Py-Hdfm-Gooey...." + str(ex)) 
+            except Exception as e:
+                logging.error(f"Failed executing hdfmonkey, please make sure it is installed in the same local directory as Py-Hdfm-Gooey.... {e}")
+                add_main_log_window(f"Failed executing hdfmonkey, please make sure it is installed in the same local directory as Py-Hdfm-Gooey.... {e}") 
                 return False
  
         def load_image():
@@ -658,7 +668,12 @@ class MainWindow(QMainWindow):
                     set_all_buttons_enabled()
                     return True
                 else:
-                    add_main_log_window("Failed loading image :" + self.right_disk_image_path + "  - hdfmonkey result code: " + str(hdfmonkeyexecresult.returncode) )  
+                    if hdfmonkeyexecresult is not None:
+                        logging.error(f"Failed loading image :{self.right_disk_image_path} - hdfmonkey result code: {hdfmonkeyexecresult.returncode}")
+                        add_main_log_window(f"Failed loading image :{self.right_disk_image_path} - hdfmonkey result code: {hdfmonkeyexecresult.returncode}")  
+                    else:
+                        logging.error(f"Failed loading image :{self.right_disk_image_path}.")
+                        add_main_log_window(f"Failed loading image :{self.right_disk_image_path}.") 
 
             set_all_buttons_disabled()
             enable_image_selection()
@@ -676,7 +691,6 @@ class MainWindow(QMainWindow):
             self.nextsync_treeview.show()        
 
         def add_main_log_window(string_to_log:str):
-
             newItem = QListWidgetItem()
             newItem.setText(string_to_log)
             self.listWidgetLog.insertItem(0, newItem)
@@ -725,6 +739,7 @@ class MainWindow(QMainWindow):
                 self.button_create_directory.setVisible(True)
                 self.button_create_directory_cancel.setVisible(True)
             else:
+                logging.info("Please load an image file first !")
                 add_main_log_window("Please load an image file first !")
             
             save_configuration_file()    
@@ -741,6 +756,7 @@ class MainWindow(QMainWindow):
                 self.button_create_directory.setVisible(False)
                 self.button_create_directory_cancel.setVisible(False)
             else:
+                logging.info("Please load an image file first !")
                 add_main_log_window("Please load an image file first !")
 
             save_configuration_file()
@@ -754,7 +770,9 @@ class MainWindow(QMainWindow):
                     nachars = ""
                     for n in DIRECTORY_CREATION_NOT_ALLOWED_CHARACTERS:
                         nachars += n
-                    add_main_log_window("Do not use any of the forbiden characters :" + nachars + " when creating directories!")
+                    
+                    logging.warning(f"Do not use any of the forbiden characters :{nachars} when creating directories!")
+                    add_main_log_window(f"Do not use any of the forbiden characters :{nachars} when creating directories!")
                     return
             
             directory_to_create = generate_disk_file_path() + "/" + directory_to_create
@@ -769,12 +787,14 @@ class MainWindow(QMainWindow):
             hdfmonkeyexecresult = execute_hdf_monkey("mkdir", self.right_disk_image_path, directory_to_create)
             
             if hdfmonkeyexecresult.returncode != 0:
-                add_main_log_window("Failed creating directory - hdfmonkey result code: " + str(hdfmonkeyexecresult.returncode) )
+                logging.error(f"Failed creating directory - hdfmonkey result code: {hdfmonkeyexecresult.returncode}")
+                add_main_log_window(f"Failed creating directory - hdfmonkey result code: {hdfmonkeyexecresult.returncode}")
                 
             hdfmonkeyexecresult = execute_hdf_monkey("ls", self.right_disk_image_path, generate_disk_file_path())
             
             if hdfmonkeyexecresult.returncode != 0:
-                add_main_log_window("Failed browsing directory after creating it - hdfmonkey result code: " + str(hdfmonkeyexecresult.returncode) )            
+                logging.error(f"Failed browsing directory after creating it - hdfmonkey result code: {hdfmonkeyexecresult.returncode}")
+                add_main_log_window(f"Failed browsing directory after creating it - hdfmonkey result code: {hdfmonkeyexecresult.returncode}")            
 
             command_execution = hdfmonkeyexecresult.stdout
             update_disk_manager_widget_table(command_execution)
@@ -816,20 +836,29 @@ class MainWindow(QMainWindow):
                     exec_process.returncode = ex.returncode
 
                     if ex.returncode == 1:
-
-                        add_main_log_window("ERROR: Once hdfmonkey is installed in the same directory close the application and restart it.")
+                        logging.error(f"Failed executing hdfmonkey: {execution_cmd} - Once hdfmonkey is installed in the same directory please close the application and restart it.")
+                        add_main_log_window("ERROR: Once hdfmonkey is installed in the same directory please close the application and restart it.")
                         
                         if platform.system() == "Windows":
-                            add_main_log_window("ERROR: hdfmonkey is required and likely not present in local directory, please install a pre-compiled version from https://uto.speccy.org/downloads/hdfmonkey_windows.zip or compile it from https://github.com/gasman/hdfmonkey .")
+                            logging.error(f"ERROR: hdfmonkey is required and likely not present in local directory, please install a pre-compiled version from https://uto.speccy.org/downloads/hdfmonkey_windows.zip or compile it from https://github.com/gasman/hdfmonkey.")
+                            add_main_log_window("ERROR: hdfmonkey is required and likely not present in local directory, please install a pre-compiled version from https://uto.speccy.org/downloads/hdfmonkey_windows.zip or compile it from https://github.com/gasman/hdfmonkey.")
                         else:
-                            add_main_log_window("ERROR: hdfmonkey execution failed:" + str(ex) + ", please make sure it is installed from https://github.com/gasman/hdfmonkey and working properly.")
-                            
-                            
+                            logging.error(f"ERROR: hdfmonkey execution failed: {ex}, please make sure it is installed from https://github.com/gasman/hdfmonkey and working properly.")
+                            add_main_log_window(f"ERROR: hdfmonkey execution failed: {ex}, please make sure it is installed from https://github.com/gasman/hdfmonkey and working properly.")
                     elif ex.returncode == 255:
-                        add_main_log_window("ERROR: hdfmonkey failed - A file can't be opened: " + execution_cmd + " this is commonly caused by strange characters such as quotes and signs")
+                        if execution_cmd is not None:
+                            logging.error(f"ERROR: hdfmonkey failed - A file can't be opened: {execution_cmd} this is commonly caused by strange characters such as quotes and signs")
+                            add_main_log_window(f"ERROR: hdfmonkey failed - A file can't be opened: {execution_cmd} this is commonly caused by strange characters such as quotes and signs")
+                        else:
+                            logging.error(f"ERROR: hdfmonkey failed - A file can't be opened this is commonly caused by strange characters such as quotes and signs")
+                            add_main_log_window(f"ERROR: hdfmonkey failed - A file can't be opened this is commonly caused by strange characters such as quotes and signs")
                     else:
-                        add_main_log_window("ERROR: hdfmonkey " + HDFMONKEY_EXECUTABLE + " execution failed with unknown error: " + execution_cmd + " - :" + str(ex))
-                    #pass
+                        if HDFMONKEY_EXECUTABLE is not None and execution_cmd is not None:
+                            logging.error(f"ERROR: hdfmonkey {HDFMONKEY_EXECUTABLE} execution failed with unknown error: {execution_cmd} - Exception: {ex}")
+                            add_main_log_window(f"ERROR: hdfmonkey {HDFMONKEY_EXECUTABLE} execution failed with unknown error: {execution_cmd} - Exception: {ex}")
+                        else:
+                            logging.error(f"ERROR: hdfmonkey execution failed with unknown error: - Exception: {ex}")
+                            add_main_log_window(f"ERROR: hdfmonkey  execution failed with unknown error: - Exception: {ex}")
                             
             return exec_process
         
@@ -868,19 +897,20 @@ class MainWindow(QMainWindow):
 
                         file_type = directory_result_table[0]
                         file_name = directory_result_table[1].replace("'", "").replace('"', "")
-                        #file_name = directory_result_table[1].replace('"', "")
                 
                         if not is_filetype_a_directory(file_type):
                             hdfmonkeyexecresult = execute_hdf_monkey("rm", self.right_disk_image_path,'"' + destination + "/" + file_name + '"')
                             if hdfmonkeyexecresult.returncode != 0:
-                                add_main_log_window("Failed deleting file " + self.right_disk_image_path + '"' + destination + "/" + file_name + '"' + " - hdfmonkey result code: " + str(hdfmonkeyexecresult.returncode) )            
+                                logging.error(f"Failed deleting file: {self.right_disk_image_path}{destination}/{file_name} - hdfmonkey result code: {hdfmonkeyexecresult.returncode}")
+                                add_main_log_window(f"Failed deleting file: {self.right_disk_image_path}{destination}/{file_name} - hdfmonkey result code: {hdfmonkeyexecresult.returncode}")            
 
                         else:
                             delete_sub_directory_content(image_path, destination + "/" + file_name)
                             # delete the directory in then end
                             hdfmonkeyexecresult = execute_hdf_monkey("rm", self.right_disk_image_path,'"' + destination + "/" + file_name + '"')
                             if hdfmonkeyexecresult.returncode != 0:
-                                add_main_log_window("Failed deleting file " + self.right_disk_image_path + '"' + destination + "/" + file_name + '"' + " - hdfmonkey result code: " + str(hdfmonkeyexecresult.returncode) )            
+                                logging.error(f"Failed deleting file: {self.right_disk_image_path}{destination}/{file_name} - hdfmonkey result code: {hdfmonkeyexecresult.returncode}")
+                                add_main_log_window(f"Failed deleting file: {self.right_disk_image_path}{destination}/{file_name} - hdfmonkey result code: {hdfmonkeyexecresult.returncode}")            
             
         # recursively get all files in sub directories from image and copy to disj
         def get_directory_content(image_path, image_source, disk_source, folder_name):
@@ -925,7 +955,8 @@ class MainWindow(QMainWindow):
                             
                                 hdfmonkeyexecresult = execute_hdf_monkey("get", self.right_disk_image_path, get_source)
                                 if hdfmonkeyexecresult.returncode != 0:
-                                    add_main_log_window("Failed getting file: " + self.right_disk_image_path + '"' + image_source + "/" + file_name + '"' + " - hdfmonkey result code: " + str(hdfmonkeyexecresult.returncode))            
+                                    logging.error(f"Failed getting file: {self.right_disk_image_path}{image_source}/{file_name} - hdfmonkey result code: {hdfmonkeyexecresult.returncode}")
+                                    add_main_log_window(f"Failed getting file: {self.right_disk_image_path}{image_source}/{file_name} - hdfmonkey result code: {hdfmonkeyexecresult.returncode}")            
 
                             else:
 
@@ -936,15 +967,11 @@ class MainWindow(QMainWindow):
                                     os.makedirs(disk_destination)
                                 except FileExistsError:
                                     pass
-                                except Exception as ex:
-                                    add_main_log_window("Failed creating directory: " + disk_destination + " - " + str(ex))            
-                                    
-                                # execresult = execute_shell_command("mkdir" , '"' + disk_destination + '"')
-                                # if execresult.returncode != 0:
-                                #     add_main_log_window("Failed creating directory: " + disk_destination + " - hdfmonkey result code: " + str(execresult.returncode) + " - " + str(execresult.stderr))            
+                                except Exception as e:
+                                    logging.error(f"Failed creating directory: {disk_destination} - Exception: {e}")
+                                    add_main_log_window(f"Failed creating directory: {disk_destination} - Exception: {e}")            
 
                                 get_directory_content (image_path, image_source, disk_source,  file_name)
-
         
         #First returned value is the root parent directory full path second variable is the last path or filename
         def get_parent_root_directory_splited(file_name:str):
@@ -1008,11 +1035,10 @@ class MainWindow(QMainWindow):
                             if hdfmonkeyexecresult.returncode == 0:
                                 hdfmonkeyexecresult = execute_hdf_monkey("ls", self.right_disk_image_path,generate_disk_file_path())
                                 command_execution = hdfmonkeyexecresult.stdout
-                                                            
 
-                    except Exception as ex:
-                        
-                        add_main_log_window("Failed deleting file: " + f + " ! - " + str(ex))
+                    except Exception as e:
+                        logging.error(f"Failed deleting file: {f} ! - Exception: {e}")
+                        add_main_log_window(f"Failed deleting file: {f} ! - Exception: {e}")
                         set_all_buttons_enabled()
  
                 hdfmonkeyexecresult = execute_hdf_monkey("ls", self.right_disk_image_path,generate_disk_file_path())
@@ -1020,6 +1046,7 @@ class MainWindow(QMainWindow):
                                 
                 update_disk_manager_widget_table(command_execution)
             else:
+                logging.info("Please select an image file or folder first to delete!")
                 add_main_log_window("Please select an image file or folder first to delete!")
 
             set_all_buttons_enabled()
@@ -1030,7 +1057,12 @@ class MainWindow(QMainWindow):
                 command_execution = hdfmonkeyexecresult.stdout
                 update_disk_manager_widget_table(command_execution)
             else:
-                add_main_log_window("Failed executing hdfmonkey to list file.")      
+                if hdfmonkeyexecresult is not None:
+                    logging.error(f"Failed browsing directory after deleting files - hdfmonkey result code: {hdfmonkeyexecresult.returncode}")
+                    add_main_log_window(f"Failed browsing directory after deleting files - hdfmonkey result code: {hdfmonkeyexecresult.returncode}")
+                else:
+                    logging.error(f"Failed browsing directory after deleting files.")
+                    add_main_log_window(f"Failed browsing directory after deleting files.")
 
         def nextsync_perform_checks_and_prepare_server_start():
             nextsync_warnings()
@@ -1049,8 +1081,8 @@ class MainWindow(QMainWindow):
                 self.threadpool.start(worker)
                 nextsync_hide_start_cancel_buttons()
 
-            except Exception as ex:
-                logging.error(f"An unexpected error occurred while starting nextsync server. Exception: {ex}")          
+            except Exception as e:
+                logging.error(f"An unexpected error occurred while starting nextsync server. Exception: {e}")          
        
         # Copies the selected file to image
         def on_treeview_clicked():
@@ -1165,7 +1197,8 @@ class MainWindow(QMainWindow):
                 config_file.writelines(config_array)
                 config_file.close()            
             except Exception as e:
-                add_nextsync_log_window("Failed creating :" + str(file) + " Exception:" + str(e))
+                logging.error(f"Failed creating: {file} Exception: {e}")
+                add_nextsync_log_window(f"Failed creating: {file} Exception: {e}")
                 
         def nextsync_create_syncingore_button():
             nextsync_create_sample_ignorefile(nextsync_get_fileexplorer_root_selection() + IGNOREFILE)
@@ -1176,7 +1209,8 @@ class MainWindow(QMainWindow):
             try:
                 os.remove(nextsync_get_fileexplorer_root_selection() + IGNOREFILE)
             except Exception as e:
-                add_nextsync_log_window("Failed deleting:" + str(nextsync_get_fileexplorer_root_selection() + IGNOREFILE) + " Exception:" + str(e))   
+                logging.error(f"Failed deleting: {nextsync_get_fileexplorer_root_selection() + IGNOREFILE} Exception: {e}")
+                add_nextsync_log_window(f"Failed deleting: {nextsync_get_fileexplorer_root_selection() + IGNOREFILE} Exception: {e}")   
                 
             nextsync_show_sync_buttons_based_on_fileexplorer_content_selection()
             save_configuration_file()
@@ -1185,7 +1219,8 @@ class MainWindow(QMainWindow):
             try:
                 os.remove(nextsync_get_fileexplorer_root_selection() + SYNCPOINT)
             except Exception as e:
-                add_nextsync_log_window("Failed deleting:" + str(nextsync_get_fileexplorer_root_selection() + SYNCPOINT) + " Exception:" + str(e))   
+                logging.error(f"Failed deleting: {nextsync_get_fileexplorer_root_selection() + SYNCPOINT} Exception: {e}")
+                add_nextsync_log_window(f"Failed deleting: {nextsync_get_fileexplorer_root_selection() + SYNCPOINT} Exception: {e}")   
                 
             nextsync_show_sync_buttons_based_on_fileexplorer_content_selection()
         
@@ -1318,8 +1353,9 @@ class MainWindow(QMainWindow):
                                     os.makedirs(selected_explorer_item_directory_destination + '\\'+ f)
                                 except FileExistsError:
                                     pass
-                                except Exception as ex:
-                                    add_main_log_window("Failed creating directory: " + '"' + selected_explorer_item_directory_destination + '\\'+ f + '" - ' + str(ex) )   
+                                except Exception as e:
+                                    logging.error(f"Failed creating directory: {selected_explorer_item_directory_destination}\\{f} - Exception: {e}")
+                                    add_main_log_window(f"Failed creating directory: {selected_explorer_item_directory_destination}\\{f} - Exception: {e}")   
                                     
                             else:
                                 
@@ -1328,13 +1364,15 @@ class MainWindow(QMainWindow):
                                 except FileExistsError:
                                     pass
                                 except:
-                                    add_main_log_window("Failed creating directory: " + '"' + selected_explorer_item_directory_destination + '/'+ f + '"' ) 
+                                    logging.error(f"Failed creating directory: {selected_explorer_item_directory_destination}/{f}")
+                                    add_main_log_window(f"Failed creating directory: {selected_explorer_item_directory_destination}/{f}") 
                             
                             get_directory_content(self.right_disk_image_path, str(generate_disk_file_path()), selected_explorer_item_directory_destination, f)
 
                 set_all_buttons_enabled()
                 
             else:
+                logging.warning("Please load an image file first !")
                 add_main_log_window("Please load an image file first !")
                 
         def transfert_content_from_disk_to_image():
@@ -1355,7 +1393,8 @@ class MainWindow(QMainWindow):
                     # try to upload the file
                     hdfmonkeyexecresult = execute_hdf_monkey("put", self.right_disk_image_path, self.left_file_explorer_selection_full_filename_path + " " + dest_file_path)
                 except:
-                    add_main_log_window("Failed uploading to image: " + str(self.right_disk_image_path) + " file: " + self.left_file_explorer_selection_full_filename_path + " " + str(dest_file_path))
+                    logging.error(f"Failed uploading to image: {self.right_disk_image_path} file: { self.left_file_explorer_selection_full_filename_path} {dest_file_path}")
+                    add_main_log_window(f"Failed uploading to image: {self.right_disk_image_path} file: { self.left_file_explorer_selection_full_filename_path} {dest_file_path}")
                 
                 # refresh image explorer view after the upload
                 hdfmonkeyexecresult = execute_hdf_monkey("ls", self.right_disk_image_path, generate_disk_file_path())
@@ -1364,11 +1403,17 @@ class MainWindow(QMainWindow):
                     command_execution = hdfmonkeyexecresult.stdout
                     update_disk_manager_widget_table(command_execution)
                 else:
-                    add_main_log_window("Failed loading image :" + self.right_disk_image_path + "  - hdfmonkey result code: " + str(hdfmonkeyexecresult.returncode) )  
+                    if hdfmonkeyexecresult is not None:
+                        logging.error(f"Failed browsing directory after uploading file - hdfmonkey result code: {hdfmonkeyexecresult.returncode}")
+                        add_main_log_window(f"Failed browsing directory after uploading file - hdfmonkey result code: {hdfmonkeyexecresult.returncode}")
+                    else:
+                        logging.error(f"Failed browsing directory after uploading file!")
+                        add_main_log_window(f"Failed browsing directory after uploading file!" )  
                     
                 set_all_buttons_enabled()
                 
             else:
+                logging.warning("Please load an image file first !")
                 add_main_log_window("Please load an image first!")  
         
         def generate_disk_file_path():
@@ -1430,6 +1475,7 @@ class MainWindow(QMainWindow):
                 set_all_buttons_enabled()
                 
             else:
+                logging.warning("Please load an image file first !")
                 add_main_log_window("Please load an image file first !")
                 
         def update_disk_manager_widget_table(command_execution_content):
@@ -1508,6 +1554,7 @@ class MainWindow(QMainWindow):
                         try:
                             file_size = str(str.split(file_type,"'")[1])
                         except:
+                            logging.info(f"update_disk_manager_widget_table file split failed for: {file_type}")
                             file_size = "0"
                     
                     newItemFS = QTableWidgetItem(file_size)
@@ -2421,14 +2468,13 @@ class MainWindow(QMainWindow):
             self.diskimageexplorerlabelpath.setText("Please load an image.")
         else:
             self.diskimageexplorerlabelpath.setText(generate_disk_file_path().replace('//', '/'))
-        
 
         nextsync_show_ip_info()
         nextsync_show_sync_buttons_based_on_fileexplorer_content_selection()
         
-        
-
-        
+""" 
+    Main application loop        
+"""
         
 app = QApplication(sys.argv)
 
