@@ -55,7 +55,7 @@ import urllib.request
 import zipfile, traceback
 import logging
 
-PY_HDFM_GOOEY_VERSION = "2.9"
+PY_HDFM_GOOEY_VERSION = "3.0"
 PY_HDFM_GOOEY_ICON_IMAGE_FILE = "py-hdfm-gooey.png"
 PY_HDFM_GOOEY_VERBOSE_LOG_MODE = False
 PY_HDFM_GOOEY_UI_SIZE_MULTIPLIER = 1
@@ -270,7 +270,7 @@ class MainWindow(QMainWindow):
                 return None
 
             try:
-                index = next(i for i, v in enumerate(tuple_type) if v == text_value)
+                index = next(i for i, v in enumerate(tuple_type) if v[0] == text_value)
                 return tuple_type[index][1]
             except StopIteration:
                 return None  # value not found
