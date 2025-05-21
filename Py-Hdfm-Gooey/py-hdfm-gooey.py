@@ -55,7 +55,7 @@ import urllib.request
 import zipfile, traceback
 import logging
 
-PY_HDFM_GOOEY_VERSION = "2.8"
+PY_HDFM_GOOEY_VERSION = "2.9"
 PY_HDFM_GOOEY_ICON_IMAGE_FILE = "py-hdfm-gooey.png"
 PY_HDFM_GOOEY_VERBOSE_LOG_MODE = False
 PY_HDFM_GOOEY_UI_SIZE_MULTIPLIER = 1
