@@ -28,7 +28,7 @@ Py-Hdfm-Gooey is a Qt Application using pyside6 in Python on top of Qt6, which r
 Pyside6 is not bundled and needs to be installed separately (see installation instructions).
 
 
- GNU GENERAL PUBLIC LICENSE
+                    GNU GENERAL PUBLIC LICENSE
                        Version 2, June 1991
 
  Copyright (C) 1989, 1991 Free Software Foundation, Inc.,
