@@ -271,7 +271,7 @@ class MainWindow(QMainWindow):
 
             try:
                 index = next(i for i, v in enumerate(tuple_type) if v == text_value)
-                return tuple_type[index]
+                return tuple_type[index][1]
             except StopIteration:
                 return None  # value not found
         
