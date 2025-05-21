@@ -4,6 +4,7 @@ Py-Hdfm-Gooey by Julien Clauzel based on:
 * NextSync by Jari Komppa
 
 This project is licensed under the terms of the MIT license.
+Py-Hdfm-Gooey is a Qt Application using pyside6 in Python on top of Qt6, which retains the GPLv2 Licensing (see the LICENSE file).
 
 Videos:
 * "Setup & How to": https://youtu.be/FJG-Z0DCIjQ
