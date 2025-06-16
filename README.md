@@ -130,7 +130,7 @@ The file format is compatible with emOOK original tool but contains more options
 
 Known issues
 ----------------
-* hdfmonkey external tool is required, when Py-Hdfm-Gooey starts will look for it in your system path. If not present it will try to automatically try to download it from the internet on Windows (MAC/Linux requires a manual installation). You will need to download, extract & install manually CSpect in the same folder yourself.
+* hdfmonkey external tool is required, when Py-Hdfm-Gooey starts it will check for its presence in your system path. If not present it will try to automatically download it from the internet on Windows (MAC/Linux requires a manual installation). If hdfmonkey for whatever reason (no internet access or python executable outbound internet calls are blocked by your machine firewall) you will need to download, extract & install manually CSpect in the same folder yourself.
 * Pyside6 and recent version of Python are required to be installed first you may refer to the requirements section above.
 * On other operating systems than Windows: you need to install, configure/compile manually hdfmonkey as well as mono (to be able to run Microsoft .NET on these platforms as Cspect is based on it).
 * Some files on the Spectrum Next image that contain special characters such as single quotes may not be downloaded / retrieved correctly. 
