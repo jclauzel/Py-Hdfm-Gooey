@@ -37,7 +37,7 @@ For more information, please check the “Help” tab in the tool or below.
 Requirements
 ------------
 
-- Python 3.7+
+- Python 3.7+ or higher (the latest version is recommended)
 - pyside6
 - CSpect emulator by Mike Dailly installed in local directory please download from http://www.cspect.org
     feel free to support his development efforts & patreon https://www.patreon.com/mikedailly
@@ -51,7 +51,7 @@ Requirements
 * Additional help pages:
     - https://wiki.specnext.dev/Development_Tools:Linux_setup
 
-* Install Python from: https://www.python.org/downloads/
+* Install Python from: https://www.python.org/downloads/ (the latest version is recommended)
   
 * Install pyside6 this is required for the UI to render the different controls being used. To install pyside6 open an elevated command shell and run:
 
