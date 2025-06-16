@@ -15,7 +15,7 @@ Py-Hdfm-Gooey provides a cross platform (Windows, Linux, MacOS) Graphical Interf
 * The former is mostly targeted at CSpect emulator users, and it provides a simple to use frontend interface to transfer content to an image and start the Spectrum Next emulator. 
 * The latter allows hardware owners such as Kickstarter & Clones that has a Wifi/ESP module to synchronize content directly from a machine over the network to their Next machines.
 
-The first tab of Py Hdfm Gooey is aimed at CSpect emulator users and developers. In that section you can mount an HDF image used by CSpect and upload download content using a built simple file explorer. Once the content is uploaded to the image you can then start CSpect directly from it and therefore exposes a simple to use frontend interface to the emulator. Key settings such as screen size can be directly adjusted, it avoids the need to know command line options to start using your emulated Spectrum Next.
+The first tab of Py-Hdfm-Gooey is aimed at CSpect emulator users and developers. In that section you can mount an HDF image used by CSpect and upload download content using a built simple file explorer. Once the content is uploaded to the image you can then start CSpect directly from it and therefore exposes a simple to use frontend interface to the emulator. Key settings such as screen size can be directly adjusted, it avoids the need to know command line options to start using your emulated Spectrum Next.
 
 The second tab is designed for real hardware owners such as KS1, KS2 or other clones that also has an ESP (WIFI module). Jari designed a while back a custom protocol called NextSync that allows to synchronize an entire folder from a machine (PC/MAC/Linux) that resides on a remote machine back to the Spectrum Next over the network (it is one way only). This utility implements the “server” side the program that will ‘listen’ and waits for incoming connections from your Next. On your Next machine you will run the custom dot “.sync” or ".syncfast" command that connects to the server here Py-Hdfm-Gooey. To set this up you will need first to download Jari zip package. The latest release v1.2 of the dot .sync command can be found here https://github.com/Threetwosevensixseven/specnext/releases/tag/nextsync_v1.2 . 
 
@@ -36,7 +36,7 @@ For more information, please check the “Help” tab in the tool or below.
 
 Requirements
 ------------
-
+- py-hdfm-gooey.py either download the latest release here or clone this repo, locate where this file is located that is main tool (there are no executable as it is a Python program).
 - Python 3.7+ or higher (the latest version is recommended)
 - pyside6
 - CSpect emulator by Mike Dailly installed in local directory please download from http://www.cspect.org
