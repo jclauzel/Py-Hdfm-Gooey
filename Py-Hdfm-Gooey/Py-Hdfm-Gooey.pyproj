@@ -11,6 +11,8 @@
     <OutputPath>.</OutputPath>
     <Name>Py-Hdfm-Gooey</Name>
     <RootNamespace>Py-Hdfm-Gooey</RootNamespace>
+    <InterpreterId>
+    </InterpreterId>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
     <DebugSymbols>true</DebugSymbols>
