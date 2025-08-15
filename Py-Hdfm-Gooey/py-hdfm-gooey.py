@@ -54,8 +54,9 @@ from PySide6.QtWidgets import QApplication, QComboBox, QDialogButtonBox, QLabel,
 import urllib.request
 import zipfile, traceback
 import logging
+import ctypes
 
-PY_HDFM_GOOEY_VERSION = "3.0"
+PY_HDFM_GOOEY_VERSION = "3.1"
 PY_HDFM_GOOEY_ICON_IMAGE_FILE = "py-hdfm-gooey.png"
 PY_HDFM_GOOEY_VERBOSE_LOG_MODE = False
 PY_HDFM_GOOEY_UI_SIZE_MULTIPLIER = 1
@@ -1895,7 +1896,15 @@ class MainWindow(QMainWindow):
             self.nextsync_prepare_server.setVisible(True)
             self.nextsync_progressbar.setVisible(False)
 
-
+        def list_windows_drives():
+            """Return a list of drive letters on Windows."""
+            drives = []
+            bitmask = ctypes.windll.kernel32.GetLogicalDrives()
+            for letter in string.ascii_uppercase:
+                if bitmask & 1:
+                    drives.append(f"{letter}:\\")
+                bitmask >>= 1
+            return drives
             
         # ------------------------------------------
         # main program starts here
@@ -1963,7 +1972,7 @@ class MainWindow(QMainWindow):
         
         if platform.system() == "Windows":
 
-            available_drives = ['%s:' % d for d in string.ascii_uppercase if os.path.exists('%s:' % d)]
+            available_drives = list_windows_drives()
         
             for letter in available_drives:
                  self.hdfm_gooey_diskdrive.addItem(letter)            
@@ -2277,7 +2286,7 @@ class MainWindow(QMainWindow):
         
         if platform.system() == "Windows":
 
-            available_drives = ['%s:' % d for d in string.ascii_uppercase if os.path.exists('%s:' % d)]
+            available_drives = list_windows_drives()
         
             for letter in available_drives:
                  self.nextsync_diskdrive.addItem(letter)            
