@@ -34,11 +34,18 @@ There are many other option & features in the tool for example once the first fu
 
 For more information, please check the “Help” tab in the tool or below.
 
+Installation
+------------
+There is no need for an executable as the main py-hdfm-gooey.py file mostly needs a recent Python interpreter to run. 
+Clone the repository, install a recent Python interpreter, install PySide6 Python library and you’re good to go. 
+
+For a full install overview feel free to follow this "Setup & How to" video: https://youtu.be/FJG-Z0DCIjQ
+  
 Requirements
 ------------
 - py-hdfm-gooey.py either download the latest release here or clone this repo, locate where this file is located that is main tool (there are no executable as it is a Python program).
 - Python 3.7+ or higher (the latest version is recommended)
-- pyside6
+- PySide6
 - CSpect emulator by Mike Dailly installed in local directory please download from http://www.cspect.org
     feel free to support his development efforts & patreon https://www.patreon.com/mikedailly
     - Make sure Spectrum Next roms installed are installed in local directory (they should be provided in the CSpect zip package by default). 
