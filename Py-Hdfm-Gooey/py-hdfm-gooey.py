@@ -1,4 +1,4 @@
-
+﻿
 #!/usr/bin/env python3
 
 """ 
@@ -51,12 +51,13 @@ import sys, os, string, subprocess, platform, datetime, fnmatch, socket, struct,
 from PySide6.QtCore import QSize, Qt, QSortFilterProxyModel, QModelIndex, QDir, QRunnable, Slot, Signal, QObject, QThreadPool, QRect
 from PySide6.QtGui import QIcon, QColor
 from PySide6.QtWidgets import QApplication, QComboBox, QDialogButtonBox, QLabel, QMainWindow, QPushButton, QTableWidget, QVBoxLayout, QWidget, QFileSystemModel, QTreeView, QFormLayout, QHBoxLayout, QLineEdit, QListWidgetItem, QListWidget, QFileDialog, QTableWidgetItem, QAbstractItemView, QDialog, QGridLayout, QTabWidget, QProgressBar, QCheckBox
+from PySide6 import QtCore
 import urllib.request
 import zipfile, traceback
 import logging
 import ctypes
 
-PY_HDFM_GOOEY_VERSION = "3.1"
+PY_HDFM_GOOEY_VERSION = "3.2"
 PY_HDFM_GOOEY_ICON_IMAGE_FILE = "py-hdfm-gooey.png"
 PY_HDFM_GOOEY_VERBOSE_LOG_MODE = False
 PY_HDFM_GOOEY_UI_SIZE_MULTIPLIER = 1
@@ -466,8 +467,8 @@ class MainWindow(QMainWindow):
                         configuration_dictionary[SETTING_NEXTSYNC_EXPLORERPATH] = root_folder
                         
 
-                    self.nextsync_model.setRootPath(configuration_dictionary[SETTING_NEXTSYNC_EXPLORERPATH])
-                    self.nextsync_treeview.setRootIndex(self.nextsync_model.index(configuration_dictionary[SETTING_NEXTSYNC_EXPLORERPATH]))
+                    self.nextsync_filesystem_model.setRootPath(configuration_dictionary[SETTING_NEXTSYNC_EXPLORERPATH])
+                    self.nextsync_treeview.setRootIndex(self.nextsync_filesystem_model.index(configuration_dictionary[SETTING_NEXTSYNC_EXPLORERPATH]))
                     self.left_file_nextsync_explorer_selection_full_filename_path = configuration_dictionary[SETTING_NEXTSYNC_EXPLORERPATH]
                     self.nextsync_file_explorer_path.setText(self.left_file_nextsync_explorer_selection_full_filename_path)
                 
@@ -1095,8 +1096,17 @@ class MainWindow(QMainWindow):
        
         # Copies the selected file to image
         def on_treeview_clicked():
+
             for ix in self.treeview.selectedIndexes():
+
+                # Re‑sort (in case the view has changed)
+                # (The proxy keeps the same sort order, but this forces a rebuild.)
+                self.proxy_model.invalidate()
+                self.proxy_model.sort(0, QtCore.Qt.AscendingOrder)
+
+
                 if self.model.fileName(ix) == "..":
+
                     self.left_file_explorer_selection_file_name = ""
                     self.left_file_explorer_selection_full_filename_path = self.model.filePath(ix)
                     
@@ -1106,6 +1116,7 @@ class MainWindow(QMainWindow):
                         selected_explorer_item_directory_destination += splitted_filepath[file_dest_token] + "/"
                         
                     self.treeview.setRootIndex(self.model.index(selected_explorer_item_directory_destination,0))
+
                     set_treeview_properties()
                     self.treeview.show()
                     
@@ -1132,6 +1143,11 @@ class MainWindow(QMainWindow):
             # if the user clicks on ".." to go a level up in directory structure set the root path a level up
             nextsync_hide_start_cancel_buttons()
             self.nextsync_prepare_server.setVisible(True)
+
+            # Re‑sort (in case the view has changed)
+            # (The proxy keeps the same sort order, but this forces a rebuild.)
+            self.proxy_model.invalidate()
+            self.proxy_model.sort(0, QtCore.Qt.AscendingOrder)
 
             for ix in self.treeview.selectedIndexes():
                 if self.model.fileName(ix) == "..":
@@ -1264,18 +1280,23 @@ class MainWindow(QMainWindow):
             
             nextsync_hide_start_cancel_buttons()
             self.nextsync_prepare_server.setVisible(True)
+
+            # Re‑sort (in case the view has changed)
+            # (The proxy keeps the same sort order, but this forces a rebuild.)
             
+            self.nextsync_model.sort(0, QtCore.Qt.AscendingOrder)
+
             for ix in self.nextsync_treeview.selectedIndexes():
-                if self.nextsync_model.fileName(ix) == "..":
+                if self.nextsync_filesystem_model.fileName(ix) == "..":
                     self.left_file_nextsync_explorer_selection_file_name = ""
-                    self.left_file_nextsync_explorer_selection_full_filename_path = self.nextsync_model.filePath(ix)
+                    self.left_file_nextsync_explorer_selection_full_filename_path = self.nextsync_filesystem_model.filePath(ix)
                     
                     splitted_filepath = self.left_file_nextsync_explorer_selection_full_filename_path.split('/')
                     selected_explorer_item_directory_destination = ""
                     for file_dest_token in range (0, len(splitted_filepath)-2):
                         selected_explorer_item_directory_destination += splitted_filepath[file_dest_token] + "/"
                         
-                    self.nextsync_treeview.setRootIndex(self.nextsync_model.index(selected_explorer_item_directory_destination,0))
+                    self.nextsync_treeview.setRootIndex(self.nextsync_filesystem_model.index(selected_explorer_item_directory_destination,0))
                     set_treeview_properties()
                     self.nextsync_treeview.show()
                     
@@ -1289,11 +1310,11 @@ class MainWindow(QMainWindow):
                 
                 else:
                     
-                    self.left_file_nextsync_explorer_selection_file_name = self.nextsync_model.fileName(ix)
-                    self.left_file_nextsync_explorer_selection_full_filename_path = self.nextsync_model.filePath(ix)
+                    self.left_file_nextsync_explorer_selection_file_name = self.nextsync_filesystem_model.fileName(ix)
+                    self.left_file_nextsync_explorer_selection_full_filename_path = self.nextsync_filesystem_model.filePath(ix)
                     if platform.system() != "Windows":
-                        self.left_file_nextsync_explorer_selection_full_filename_path.replace("\\", '/')                
-                
+                        self.left_file_nextsync_explorer_selection_full_filename_path = self.left_file_nextsync_explorer_selection_full_filename_path.replace("\\", '/')
+
                     self.nextsync_file_explorer_path.setText(self.left_file_nextsync_explorer_selection_full_filename_path)
                     configuration_dictionary[SETTING_NEXTSYNC_EXPLORERPATH] = self.left_file_nextsync_explorer_selection_full_filename_path
                     save_configuration_file()
@@ -2020,8 +2041,15 @@ class MainWindow(QMainWindow):
 
         self.treeview = QTreeView()
         self.treeview.setModel(self.model)
+        self.treeview.setSortingEnabled(True)
+        self.model.sort(0, Qt.AscendingOrder)
+
         self.proxy_model = QSortFilterProxyModel(recursiveFilteringEnabled = True, filterRole = QFileSystemModel.FileNameRole)
-        self.proxy_model.setSourceModel(self.model)        
+        self.proxy_model.setSourceModel(self.model)   
+        
+        self.proxy_model.setSortCaseSensitivity(QtCore.Qt.CaseInsensitive)
+        self.proxy_model.setDynamicSortFilter(True)
+
         self.treeview.setRootIndex(self.model.index(available_drives[0]))
         
         self.treeview.show()
@@ -2315,17 +2343,30 @@ class MainWindow(QMainWindow):
 
         
         self.nextsync_form.addRow(self.horizontal10)  
-        
-        self.nextsync_model = QFileSystemModel()
-
-        self.nextsync_model.setRootPath('/')
-        self.nextsync_model.setFilter(~QDir.NoDotAndDotDot | QDir.NoDot)
 
         self.nextsync_treeview = QTreeView()
-        self.nextsync_treeview.setModel(self.nextsync_model)
-        self.proxy_model = QSortFilterProxyModel(recursiveFilteringEnabled = True, filterRole = QFileSystemModel.FileNameRole)
-        self.proxy_model.setSourceModel(self.nextsync_model)        
-        self.nextsync_treeview.setRootIndex(self.nextsync_model.index(available_drives[0]))
+
+        self.nextsync_filesystem_model = QFileSystemModel()
+
+        self.nextsync_filesystem_model.setRootPath('/')
+        self.nextsync_filesystem_model.setFilter(~QDir.NoDotAndDotDot | QDir.NoDot)
+        self.nextsync_filesystem_model.sort(0, Qt.AscendingOrder)
+
+
+        self.nextsync_treeview.setModel(self.nextsync_filesystem_model)
+        self.nextsync_treeview.setSortingEnabled(True)
+
+
+        
+        self.nextsync_model = QSortFilterProxyModel(recursiveFilteringEnabled = True, filterRole = QFileSystemModel.FileNameRole)
+        self.nextsync_model.setSourceModel(self.nextsync_filesystem_model)       
+        
+        self.nextsync_model.setSortCaseSensitivity(QtCore.Qt.CaseInsensitive)
+        self.nextsync_model.setDynamicSortFilter(True)
+
+        self.nextsync_treeview.setRootIndex(self.nextsync_filesystem_model.index(available_drives[0]))
+
+        self.nextsync_model.sort(0, QtCore.Qt.AscendingOrder)
         
         self.nextsync_treeview.show()
 
