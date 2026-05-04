@@ -47,17 +47,17 @@
 """
 
 from math import log
-import sys, os, string, subprocess, platform, datetime, fnmatch, socket, struct, time, glob
-from PySide6.QtCore import QSize, Qt, QSortFilterProxyModel, QModelIndex, QDir, QRunnable, Slot, Signal, QObject, QThreadPool, QRect
-from PySide6.QtGui import QIcon, QColor
-from PySide6.QtWidgets import QApplication, QComboBox, QDialogButtonBox, QLabel, QMainWindow, QPushButton, QTableWidget, QVBoxLayout, QWidget, QFileSystemModel, QTreeView, QFormLayout, QHBoxLayout, QLineEdit, QListWidgetItem, QListWidget, QFileDialog, QTableWidgetItem, QAbstractItemView, QDialog, QGridLayout, QTabWidget, QProgressBar, QCheckBox
+import sys, os, string, subprocess, platform, datetime, fnmatch, socket, struct, time, glob, threading, shlex, pathlib
+from PySide6.QtCore import QSize, Qt, QSortFilterProxyModel, QModelIndex, QDir, QRunnable, Slot, Signal, QObject, QThreadPool, QRect, QTimer
+from PySide6.QtGui import QIcon, QColor, QAction, QGuiApplication
+from PySide6.QtWidgets import QApplication, QComboBox, QDialogButtonBox, QLabel, QMainWindow, QPushButton, QTableWidget, QVBoxLayout, QWidget, QFileSystemModel, QTreeView, QFormLayout, QHBoxLayout, QLineEdit, QListWidgetItem, QListWidget, QFileDialog, QTableWidgetItem, QAbstractItemView, QDialog, QGridLayout, QTabWidget, QProgressBar, QCheckBox, QMenu
 from PySide6 import QtCore
 import urllib.request
 import zipfile, traceback
 import logging
 import ctypes
 
-PY_HDFM_GOOEY_VERSION = "3.2"
+PY_HDFM_GOOEY_VERSION = "3.3"
 PY_HDFM_GOOEY_ICON_IMAGE_FILE = "py-hdfm-gooey.png"
 PY_HDFM_GOOEY_VERBOSE_LOG_MODE = False
 PY_HDFM_GOOEY_UI_SIZE_MULTIPLIER = 1
@@ -204,12 +204,172 @@ assert sys.version_info >= (3, 6) # We need 3.6 for f"" strings.
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+class DotDotFirstProxyModel(QSortFilterProxyModel):
+    """Proxy model that always keeps the '..' parent directory entry at the top."""
+    def lessThan(self, left, right):
+        left_name = self.sourceModel().fileName(left)
+        right_name = self.sourceModel().fileName(right)
+        if left_name == "..":
+            return True
+        if right_name == "..":
+            return False
+        return super().lessThan(left, right)
+
+    def filterAcceptsRow(self, source_row, source_parent):
+        source_model = self.sourceModel()
+        index = source_model.index(source_row, 0, source_parent)
+        # Always show the parent-directory entry
+        if source_model.fileName(index) == "..":
+            return True
+        pattern = self.filterRegularExpression().pattern()
+        if not pattern:
+            return True
+        name = source_model.fileName(index)
+        return pattern.lower() in name.lower()
+
 class WorkerSignals(QObject):
 
     finished = Signal()
     error = Signal(tuple)
     result = Signal(object)
     progress = Signal(int)
+
+
+class HdfTaskSignals(QObject):
+    """Signals for background hdfmonkey task workers."""
+    progress  = Signal(int)   # 0-100
+    status    = Signal(str)   # "action line\nfilename line"
+    finished  = Signal()
+    error     = Signal(str)   # human-readable error message
+    cancelled = Signal()      # emitted when the worker stopped early due to cancel
+
+
+class HdfTaskWorker(QRunnable):
+    """Generic QRunnable that runs a callable on the thread pool.
+    The callable receives (signals, cancel_event, *args, **kwargs).
+    Call worker.cancel() from the UI thread to request early termination."""
+
+    def __init__(self, fn, *args, **kwargs):
+        super().__init__()
+        self.fn           = fn
+        self.args         = args
+        self.kwargs       = kwargs
+        self.signals      = HdfTaskSignals()
+        self.cancel_event = threading.Event()
+        self.setAutoDelete(True)
+
+    def cancel(self):
+        self.cancel_event.set()
+
+    @Slot()
+    def run(self):
+        try:
+            self.fn(self.signals, self.cancel_event, *self.args, **self.kwargs)
+        except Exception as exc:
+            self.signals.error.emit(str(exc))
+        finally:
+            if self.cancel_event.is_set():
+                self.signals.cancelled.emit()
+            self.signals.finished.emit()
+
+
+class HdfProgressDialog(QDialog):
+    """Modal progress dialog with live status, progress bar, spinner, and Cancel button."""
+
+    cancel_requested = Signal()
+
+    def __init__(self, title, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setModal(True)
+        self.setMinimumWidth(540)
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowCloseButtonHint)
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(8)
+
+        # Spinner + action label on one row
+        action_row = QHBoxLayout()
+        self._spinner_label = QLabel("")
+        self._spinner_label.setFixedWidth(22)
+        action_row.addWidget(self._spinner_label)
+        self._action_label = QLabel("Starting\u2026")
+        self._action_label.setWordWrap(True)
+        action_row.addWidget(self._action_label, 1)
+        layout.addLayout(action_row)
+
+        # Current filename (smaller, muted)
+        self._file_label = QLabel("")
+        self._file_label.setWordWrap(True)
+        _font = self._file_label.font()
+        _font.setPointSize(max(_font.pointSize() - 1, 8))
+        self._file_label.setFont(_font)
+        layout.addWidget(self._file_label)
+
+        # Progress bar
+        self._bar = QProgressBar()
+        self._bar.setRange(0, 100)
+        self._bar.setValue(0)
+        self._bar.setTextVisible(True)
+        layout.addWidget(self._bar)
+
+        # Cancel button
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        self._cancel_btn = QPushButton("Cancel")
+        self._cancel_btn.setFixedWidth(90)
+        self._cancel_btn.clicked.connect(self._on_cancel_clicked)
+        btn_row.addWidget(self._cancel_btn)
+        layout.addLayout(btn_row)
+
+        self._cancelled = False
+        self._spinner_frames = ["\u25f4", "\u25f7", "\u25f6", "\u25f5"]
+        self._spinner_idx    = 0
+
+        self._anim_timer = QTimer(self)
+        self._anim_timer.setInterval(120)
+        self._anim_timer.timeout.connect(self._tick_spinner)
+        self._anim_timer.start()
+
+    # ------------------------------------------------------------------
+    def _on_cancel_clicked(self):
+        self._cancelled = True
+        self._cancel_btn.setEnabled(False)
+        self._action_label.setText("Cancelling\u2026")
+        self._file_label.setText("")
+        self.cancel_requested.emit()
+
+    def _tick_spinner(self):
+        self._spinner_idx = (self._spinner_idx + 1) % len(self._spinner_frames)
+        self._spinner_label.setText(self._spinner_frames[self._spinner_idx])
+
+    @Slot(int)
+    def set_progress(self, value: int):
+        """value == -1 activates the indeterminate (busy) marquee animation."""
+        if value < 0:
+            self._bar.setRange(0, 0)   # Qt marquee mode
+        else:
+            if self._bar.maximum() == 0:
+                self._bar.setRange(0, 100)
+            self._bar.setValue(value)
+
+    @Slot(str)
+    def set_status(self, text: str):
+        """Expects 'Action description\nFilename or detail'."""
+        if self._cancelled:
+            return
+        lines = text.split("\n", 1)
+        self._action_label.setText(lines[0])
+        self._file_label.setText(lines[1] if len(lines) > 1 else "")
+
+    def mark_cancelled(self):
+        """Called when the worker confirms it stopped early."""
+        self._action_label.setText("Cancelled.")
+        self._file_label.setText("")
+
+    def closeEvent(self, event):
+        self._anim_timer.stop()
+        super().closeEvent(event)
 
 
 class MainWindow(QMainWindow):
@@ -328,7 +488,6 @@ class MainWindow(QMainWindow):
             self.button_to_disk.setDisabled(True)
             self.button_to_image.setDisabled(True)
             self.TableWidgetImage.setDisabled(True)
-            self.button_to_disk.setDisabled(True)
             self.button_new_folder.setDisabled(True)
             self.button_delete_files.setDisabled(True)
             self.button_cancel.setDisabled(True)
@@ -353,7 +512,6 @@ class MainWindow(QMainWindow):
             self.button_to_disk.setDisabled(False)
             self.button_to_image.setDisabled(False)
             self.TableWidgetImage.setDisabled(False)
-            self.button_to_disk.setDisabled(False)
             self.button_new_folder.setDisabled(False)
             self.button_delete_files.setDisabled(False)
             self.button_cancel.setDisabled(False)
@@ -422,11 +580,6 @@ class MainWindow(QMainWindow):
                         config_setting_name, config_setting_value = line.strip().split('=')
                         configuration_dictionary[config_setting_name] = config_setting_value
 
-                        for cs in CONFIG_FILE_SETTINGS:
-                            if cs == config_setting_name:
-                                configuration_dictionary[cs] = config_setting_value
-                                break
-
                 
                 #  Now set the settings back to the application SETTING_SCREENSIZE and others
 
@@ -444,31 +597,19 @@ class MainWindow(QMainWindow):
                 
                 if configuration_dictionary[SETTING_EXPLORERPATH] != "":
                     if not os.path.isdir(configuration_dictionary[SETTING_EXPLORERPATH]):
-                        # if the path is a file instead of a directory point explorer path to the root folder instead
-                        splited_path = str.split(configuration_dictionary[SETTING_EXPLORERPATH], "/")
-                        root_folder = ""
-                        for rf in range (0,len(splited_path)-1):
-                            root_folder += splited_path[rf] + "/"
-                        configuration_dictionary[SETTING_EXPLORERPATH] = root_folder
+                        configuration_dictionary[SETTING_EXPLORERPATH] = os.path.dirname(configuration_dictionary[SETTING_EXPLORERPATH].rstrip("/\\")) + "/"
                         
 
-                    self.model.setRootPath(configuration_dictionary[SETTING_EXPLORERPATH])
-                    self.treeview.setRootIndex(self.model.index(configuration_dictionary[SETTING_EXPLORERPATH]))
+                    self.treeview.setRootIndex(self.proxy_model.mapFromSource(self.model.index(configuration_dictionary[SETTING_EXPLORERPATH])))
                     self.left_file_explorer_selection_full_filename_path = configuration_dictionary[SETTING_EXPLORERPATH]
                     self.file_explorer_path.setText(self.left_file_explorer_selection_full_filename_path)
 
                 if configuration_dictionary[SETTING_NEXTSYNC_EXPLORERPATH] != "":
                     if not os.path.isdir(configuration_dictionary[SETTING_NEXTSYNC_EXPLORERPATH]):
-                        # if the path is a file instead of a directory point explorer path to the root folder instead
-                        splited_path = str.split(configuration_dictionary[SETTING_NEXTSYNC_EXPLORERPATH], "/")
-                        root_folder = ""
-                        for rf in range (0,len(splited_path)-1):
-                            root_folder += splited_path[rf] + "/"
-                        configuration_dictionary[SETTING_NEXTSYNC_EXPLORERPATH] = root_folder
+                        configuration_dictionary[SETTING_NEXTSYNC_EXPLORERPATH] = os.path.dirname(configuration_dictionary[SETTING_NEXTSYNC_EXPLORERPATH].rstrip("/\\")) + "/"
                         
 
-                    self.nextsync_filesystem_model.setRootPath(configuration_dictionary[SETTING_NEXTSYNC_EXPLORERPATH])
-                    self.nextsync_treeview.setRootIndex(self.nextsync_filesystem_model.index(configuration_dictionary[SETTING_NEXTSYNC_EXPLORERPATH]))
+                    self.nextsync_treeview.setRootIndex(self.nextsync_model.mapFromSource(self.nextsync_filesystem_model.index(configuration_dictionary[SETTING_NEXTSYNC_EXPLORERPATH])))
                     self.left_file_nextsync_explorer_selection_full_filename_path = configuration_dictionary[SETTING_NEXTSYNC_EXPLORERPATH]
                     self.nextsync_file_explorer_path.setText(self.left_file_nextsync_explorer_selection_full_filename_path)
                 
@@ -503,8 +644,7 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 logging.error(f"Failed to load configuration file. Exception: {e}")
 
-            finally:
-                return config_loaded_with_success
+            return config_loaded_with_success
 
 
         def save_configuration_file():
@@ -533,10 +673,8 @@ class MainWindow(QMainWindow):
                 add_main_log_window(f"An unexpected error occurred while saving the configuration file. Exception: {e}")
 
         def is_filetype_a_directory(file_type:str):
-            if file_type == "b'[DIR]" or file_type == 'b"[DIR]':
-                return True
-            else:
-                return False  
+            ft = file_type.strip()
+            return ft == "[DIR]" or ft == "b'[DIR]" or ft == 'b"[DIR]'
             
         def get_pyhdfmgooey_currenttab_config():      
             configuration_dictionary[SETTING_DEFAULT_TAB_WHEN_OPENING] = wid_inner.tab.currentIndex()
@@ -691,14 +829,16 @@ class MainWindow(QMainWindow):
             return False
 
         def apply_file_extension_filter():
-            self.model.setNameFilters([self.filtertext.text()])
+            text = self.filtertext.text().strip()
+            self.proxy_model.setFilterFixedString(text)
             set_treeview_properties()
             self.treeview.show()
 
         def apply_file_extension_filter_nextsync():
-            self.nextsync_model.setNameFilters([self.nextsync_filtertext.text()])
+            text = self.nextsync_filtertext.text().strip()
+            self.nextsync_model.setFilterFixedString(text)
             set_treeview_properties()
-            self.nextsync_treeview.show()        
+            self.nextsync_treeview.show()
 
         def add_main_log_window(string_to_log:str):
             newItem = QListWidgetItem()
@@ -734,7 +874,7 @@ class MainWindow(QMainWindow):
             self.treeview.setSelectionMode(QAbstractItemView.SingleSelection)
             self.nextsync_treeview.setSortingEnabled(True)
             self.nextsync_treeview.sortByColumn(0, Qt.SortOrder.AscendingOrder)
-            self.nextsync_treeview.setSelectionMode(QAbstractItemView.SingleSelection)            
+            self.nextsync_treeview.setSelectionMode(QAbstractItemView.SingleSelection)
 
             
         def image_newfolder():
@@ -794,17 +934,17 @@ class MainWindow(QMainWindow):
             self.button_create_directory.setVisible(False)
             self.button_create_directory_cancel.setVisible(False)
 
-            hdfmonkeyexecresult = execute_hdf_monkey("mkdir", self.right_disk_image_path, directory_to_create)
+            hdfmonkeyexecresult = execute_hdf_monkey("mkdir", self.right_disk_image_path, extra_argv=[directory_to_create])
             
             if hdfmonkeyexecresult.returncode != 0:
                 logging.error(f"Failed creating directory - hdfmonkey result code: {hdfmonkeyexecresult.returncode}")
                 add_main_log_window(f"Failed creating directory - hdfmonkey result code: {hdfmonkeyexecresult.returncode}")
                 
-            hdfmonkeyexecresult = execute_hdf_monkey("ls", self.right_disk_image_path, generate_disk_file_path())
-            
+            hdfmonkeyexecresult = execute_hdf_monkey("ls", self.right_disk_image_path, extra_argv=[generate_disk_file_path()])
+
             if hdfmonkeyexecresult.returncode != 0:
                 logging.error(f"Failed browsing directory after creating it - hdfmonkey result code: {hdfmonkeyexecresult.returncode}")
-                add_main_log_window(f"Failed browsing directory after creating it - hdfmonkey result code: {hdfmonkeyexecresult.returncode}")            
+                add_main_log_window(f"Failed browsing directory after creating it - hdfmonkey result code: {hdfmonkeyexecresult.returncode}")
 
             command_execution = hdfmonkeyexecresult.stdout
             update_disk_manager_widget_table(command_execution)
@@ -835,20 +975,172 @@ class MainWindow(QMainWindow):
             # Now try to load it
             if load_image():
                 save_configuration_file()
+                _warn_if_image_nearly_full(self.right_disk_image_path)
         
-        def execute_hdf_monkey(command_to_execute, image_path, additional_args = ""):
-            exec_process = subprocess.CompletedProcess 
+        def _get_image_free_space_pct(image_path):
+            """Parse the FAT layout of image_path and return (free_pct, free_mb, total_mb).
+            Returns None if the image cannot be read or is not a recognised FAT volume."""
             try:
-                execution_cmd = HDFMONKEY_EXECUTABLE + " " + command_to_execute + " " + image_path + " " + additional_args
-                exec_process = subprocess.run(execution_cmd, shell=True, check=True, stdout=subprocess.PIPE)
+                clean = image_path.strip('"').strip("'")
+                with open(clean, 'rb') as f:
+                    mbr = f.read(512)
+                    pte = mbr[446:462]
+                    lba_start = struct.unpack_from('<I', pte, 8)[0]
+                    f.seek(lba_start * 512)
+                    vbr = f.read(512)
+                    bps      = struct.unpack_from('<H', vbr, 11)[0]
+                    spc      = vbr[13]
+                    rsvd     = struct.unpack_from('<H', vbr, 14)[0]
+                    nfats    = vbr[16]
+                    root_ent = struct.unpack_from('<H', vbr, 17)[0]
+                    total16  = struct.unpack_from('<H', vbr, 19)[0]
+                    fat_sz16 = struct.unpack_from('<H', vbr, 22)[0]
+                    total32  = struct.unpack_from('<I', vbr, 32)[0]
+                    fat_sz32 = struct.unpack_from('<I', vbr, 36)[0]
+                    fat_sz   = fat_sz32 if fat_sz16 == 0 else fat_sz16
+                    total    = total32  if total16  == 0 else total16
+                    if not (bps and spc and fat_sz and total):
+                        return None
+                    data_start     = rsvd + nfats * fat_sz + (root_ent * 32 + bps - 1) // bps
+                    total_clusters = (total - data_start) // spc
+                    is_fat32       = (total_clusters >= 65525)
+                    entry_size     = 4 if is_fat32 else 2
+                    fat_offset     = (lba_start + rsvd) * bps
+                    fat_size_bytes = fat_sz * bps
+                    f.seek(fat_offset)
+                    fat_data = f.read(fat_size_bytes)
+                    free_clusters = sum(
+                        1 for c in range(2, min(total_clusters + 2, len(fat_data) // entry_size))
+                        if (struct.unpack_from('<I', fat_data, c * entry_size)[0] & 0x0FFFFFFF
+                            if is_fat32
+                            else struct.unpack_from('<H', fat_data, c * entry_size)[0]) == 0
+                    )
+                    cluster_bytes = spc * bps
+                    total_mb = total_clusters * cluster_bytes // (1024 * 1024)
+                    free_mb  = free_clusters  * cluster_bytes // (1024 * 1024)
+                    free_pct = (free_clusters / total_clusters * 100) if total_clusters else 0
+                    return (free_pct, free_mb, total_mb)
+            except Exception:
+                return None
+
+        def _warn_if_image_nearly_full(image_path):
+            """Show a warning dialog if the SD image has less than 10 % free space."""
+            from PySide6.QtWidgets import QMessageBox
+            result = _get_image_free_space_pct(image_path)
+            if result is None:
+                return
+            free_pct, free_mb, total_mb = result
+            used_pct = 100 - free_pct
+            if free_pct < 10:
+                if free_pct == 0:
+                    space_line = f"The image is completely full ({total_mb} MB capacity, 0 MB free)."
+                else:
+                    space_line = (f"Only {free_mb} MB free out of {total_mb} MB "
+                                  f"({used_pct:.1f} % used, {free_pct:.1f} % free).")
+                msg = QMessageBox(self)
+                msg.setIcon(QMessageBox.Warning)
+                msg.setWindowTitle("SD Image Nearly Full")
+                msg.setText(
+                    f"\u26a0\ufe0f  The SD card image is nearly full.\n\n"
+                    f"{space_line}\n\n"
+                    f"Delete files from the image to free space, or switch to a larger image.\n"
+                    f"Larger SD card images can be downloaded from:\n"
+                    f"https://zxnext.uk/hosted/"
+                )
+                msg.setStandardButtons(QMessageBox.Ok)
+                msg.exec()
+
+        def _check_image_writable(image_path, check_free_space=True):
+            """Return None if image_path is writable, or an error string explaining why not.
+            Also checks that the FAT volume has at least one free cluster."""
+            if not image_path:
+                return "No image file selected."
+            try:
+                clean = image_path.strip('"').strip("'")
+                p = pathlib.Path(clean)
+                if not p.exists():
+                    return f"Image file not found: {clean}"
+                # Check for offline cloud file (OneDrive file not downloaded locally)
+                if hasattr(p.stat(), 'st_file_attributes'):
+                    OFFLINE = 0x1000  # FILE_ATTRIBUTE_OFFLINE
+                    if p.stat().st_file_attributes & OFFLINE:
+                        return (f"The image file is an offline cloud file (e.g. OneDrive).\n"
+                                f"Please right-click the file in Explorer and choose\n"
+                                f"'Always keep on this device' to pin it locally before writing.")
+                # Definitive write test
+                with open(clean, 'r+b') as f:
+                    # --- FAT free-cluster check (skipped for delete operations) ---
+                    if check_free_space:
+                        try:
+                            mbr = f.read(512)
+                            pte = mbr[446:462]
+                            lba_start = struct.unpack_from('<I', pte, 8)[0]
+                            f.seek(lba_start * 512)
+                            vbr = f.read(512)
+                            bps      = struct.unpack_from('<H', vbr, 11)[0]
+                            spc      = vbr[13]
+                            rsvd     = struct.unpack_from('<H', vbr, 14)[0]
+                            nfats    = vbr[16]
+                            root_ent = struct.unpack_from('<H', vbr, 17)[0]
+                            total16  = struct.unpack_from('<H', vbr, 19)[0]
+                            fat_sz16 = struct.unpack_from('<H', vbr, 22)[0]
+                            total32  = struct.unpack_from('<I', vbr, 32)[0]
+                            fat_sz32 = struct.unpack_from('<I', vbr, 36)[0]
+                            fat_sz   = fat_sz32 if fat_sz16 == 0 else fat_sz16
+                            total    = total32  if total16  == 0 else total16
+                            if bps and spc and fat_sz and total:
+                                data_start = rsvd + nfats * fat_sz + (root_ent * 32 + bps - 1) // bps
+                                total_clusters = (total - data_start) // spc
+                                is_fat32 = (total_clusters >= 65525)
+                                entry_size = 4 if is_fat32 else 2
+                                fat_offset = (lba_start + rsvd) * bps
+                                fat_size_bytes = fat_sz * bps
+                                f.seek(fat_offset)
+                                fat_data = f.read(fat_size_bytes)
+                                free = sum(
+                                    1 for c in range(2, min(total_clusters + 2, len(fat_data) // entry_size))
+                                    if (struct.unpack_from('<I', fat_data, c * entry_size)[0] & 0x0FFFFFFF
+                                        if is_fat32
+                                        else struct.unpack_from('<H', fat_data, c * entry_size)[0]) == 0
+                                )
+                                if free == 0:
+                                    cap_mb = total_clusters * spc * bps // 1024 // 1024
+                                    return (f"The image volume is full (0 free clusters, {cap_mb} MB capacity).\n"
+                                            f"Delete files from the image before adding new content.")
+                        except Exception:
+                            pass  # FAT parse failure is non-fatal for the write check
+            except OSError as e:
+                return (f"The image file cannot be opened for writing:\n{e}\n\n"
+                        f"If the file is in OneDrive, right-click it and choose\n"
+                        f"'Always keep on this device'.")
+            except Exception as e:
+                return f"Cannot check image file: {e}"
+            return None
+
+        def execute_hdf_monkey(command_to_execute, image_path, additional_args="", silent=False, extra_argv=None):
+            # Sentinel with a non-zero returncode in case we never reach subprocess.run
+            exec_process = subprocess.CompletedProcess(args=[], returncode=-1)
+            execution_cmd = f'{HDFMONKEY_EXECUTABLE} {command_to_execute} {image_path} {additional_args}'
+            try:
+                img = image_path.strip('"')
+                argv = [HDFMONKEY_EXECUTABLE, command_to_execute, img]
+                if extra_argv is not None:
+                    # Caller passes a clean list of path strings – no quoting/parsing needed
+                    argv += extra_argv
+                elif additional_args:
+                    argv += shlex.split(additional_args, posix=True)
+                exec_process = subprocess.run(argv, shell=False, check=True,
+                                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             except subprocess.CalledProcessError as ex:
-
-                    exec_process.returncode = ex.returncode
-
-                    if ex.returncode == 1:
+                    stderr_text = (ex.stderr or b"").decode(errors="replace").strip()
+                    exec_process = subprocess.CompletedProcess(args=ex.cmd, returncode=ex.returncode,
+                                                               stdout=ex.stdout, stderr=ex.stderr)
+                    if silent:
+                        logging.debug(f"hdfmonkey {command_to_execute} returned {ex.returncode} (silent): {execution_cmd}"
+                                      + (f" | stderr: {stderr_text}" if stderr_text else ""))
+                    elif ex.returncode == 1:
                         logging.error(f"Failed executing hdfmonkey: {execution_cmd} - Once hdfmonkey is installed in the same directory please close the application and restart it.")
                         add_main_log_window("ERROR: Once hdfmonkey is installed in the same directory please close the application and restart it.")
-                        
                         if platform.system() == "Windows":
                             logging.error(f"ERROR: hdfmonkey is required and likely not present in local directory, please install a pre-compiled version from https://uto.speccy.org/downloads/hdfmonkey_windows.zip or compile it from https://github.com/gasman/hdfmonkey.")
                             add_main_log_window("ERROR: hdfmonkey is required and likely not present in local directory, please install a pre-compiled version from https://uto.speccy.org/downloads/hdfmonkey_windows.zip or compile it from https://github.com/gasman/hdfmonkey.")
@@ -863,13 +1155,14 @@ class MainWindow(QMainWindow):
                             logging.error(f"ERROR: hdfmonkey failed - A file can't be opened this is commonly caused by strange characters such as quotes and signs")
                             add_main_log_window(f"ERROR: hdfmonkey failed - A file can't be opened this is commonly caused by strange characters such as quotes and signs")
                     else:
+                        err_detail = f" | stderr: {stderr_text}" if stderr_text else ""
                         if HDFMONKEY_EXECUTABLE is not None and execution_cmd is not None:
-                            logging.error(f"ERROR: hdfmonkey {HDFMONKEY_EXECUTABLE} execution failed with unknown error: {execution_cmd} - Exception: {ex}")
-                            add_main_log_window(f"ERROR: hdfmonkey {HDFMONKEY_EXECUTABLE} execution failed with unknown error: {execution_cmd} - Exception: {ex}")
+                            logging.error(f"ERROR: hdfmonkey {HDFMONKEY_EXECUTABLE} execution failed with unknown error: {execution_cmd} - Exception: {ex}{err_detail}")
+                            add_main_log_window(f"ERROR: hdfmonkey {HDFMONKEY_EXECUTABLE} execution failed with unknown error: {execution_cmd} - Exception: {ex}{err_detail}")
                         else:
-                            logging.error(f"ERROR: hdfmonkey execution failed with unknown error: - Exception: {ex}")
-                            add_main_log_window(f"ERROR: hdfmonkey  execution failed with unknown error: - Exception: {ex}")
-                            
+                            logging.error(f"ERROR: hdfmonkey execution failed with unknown error: - Exception: {ex}{err_detail}")
+                            add_main_log_window(f"ERROR: hdfmonkey  execution failed with unknown error: - Exception: {ex}{err_detail}")
+
             return exec_process
         
         def execute_shell_command(command_to_execute, additional_args = ""):
@@ -881,35 +1174,99 @@ class MainWindow(QMainWindow):
             return subprocess.run(execution_cmd, shell=False, stdin=None, stdout=None, stderr=None,close_fds=True, start_new_session=True, capture_output=False, timeout=None)        
         
         def update_root_drive():
-            self.treeview.setRootIndex(self.model.index(self.hdfm_gooey_diskdrive.itemText(0)))
+            self.treeview.setRootIndex(self.proxy_model.mapFromSource(self.model.index(self.hdfm_gooey_diskdrive.itemText(0))))
             set_treeview_properties()
             self.treeview.show()
             
         def nextsync_update_root_drive():
-            self.nextsync_treeview.setRootIndex(self.nextsync_model.index(self.nextsync_diskdrive.itemText(0)))
+            self.nextsync_treeview.setRootIndex(self.nextsync_model.mapFromSource(self.nextsync_filesystem_model.index(self.nextsync_diskdrive.itemText(0))))
             self.nextsync_treeview.show()
         
+        # ---------------------------------------------------------------
+        # Scan helpers: walk an image directory tree and return flat lists
+        # of (image_path_in_image, local_disk_path) pairs or just names,
+        # emitting live status/progress so the UI stays responsive.
+        # ---------------------------------------------------------------
+
+        def _scan_image_tree_for_get(image_path, image_source, disk_dest, cancel_event,
+                                     signals, out_files, out_dirs):
+            """Recursively enumerate all files and dirs under image_source.
+            Appends (img_src, disk_dst) tuples to out_files and out_dirs.
+            Emits status with each discovered name so the user sees live names."""
+            hdfr = execute_hdf_monkey("ls", image_path, extra_argv=[image_source])
+            if hdfr.returncode != 0:
+                return
+            for line in hdfr.stdout.splitlines():
+                if cancel_event.is_set():
+                    return
+                decoded = line.decode(errors="replace") if isinstance(line, bytes) else line
+                parts = decoded.split('\t', 1)
+                if len(parts) < 2:
+                    continue
+                ftype = parts[0]
+                fname = parts[1]
+                img_path = (image_source + "/" + fname).replace("//", "/")
+                if platform.system() == "Windows":
+                    disk_path = disk_dest + "\\" + fname
+                else:
+                    disk_path = disk_dest + "/" + fname
+                signals.status.emit(f"Scanning\u2026\n{img_path}")
+                if is_filetype_a_directory(ftype):
+                    out_dirs.append((img_path, disk_path))
+                    _scan_image_tree_for_get(image_path, img_path, disk_path, cancel_event,
+                                             signals, out_files, out_dirs)
+                else:
+                    out_files.append((img_path, disk_path))
+
+        def _scan_image_tree_for_delete(image_path, destination, cancel_event,
+                                        signals, out_files, out_dirs):
+            """Recursively enumerate all files and dirs under destination.
+            Appends item path strings to out_files (deepest first) and out_dirs."""
+            hdfr = execute_hdf_monkey("ls", image_path, extra_argv=[destination])
+            if hdfr.returncode != 0:
+                return
+            for line in hdfr.stdout.splitlines():
+                if cancel_event.is_set():
+                    return
+                decoded = line.decode(errors="replace") if isinstance(line, bytes) else line
+                parts = decoded.split('\t', 1)
+                if len(parts) < 2:
+                    continue
+                ftype = parts[0]
+                fname = parts[1]
+                full  = (destination + "/" + fname).replace("//", "/")
+                signals.status.emit(f"Scanning\u2026\n{full}")
+                if is_filetype_a_directory(ftype):
+                    _scan_image_tree_for_delete(image_path, full, cancel_event,
+                                                signals, out_files, out_dirs)
+                    out_dirs.append(full)   # directory itself deleted after its contents
+                else:
+                    out_files.append(full)
+
         # recursively delete all files in sub directories
         def delete_sub_directory_content(image_path, destination):
             
             # list and delete all files in that directory
-            hdfmonkeyexecresult = execute_hdf_monkey("ls", image_path, '"' + destination + '"')
+            hdfmonkeyexecresult = execute_hdf_monkey("ls", image_path, extra_argv=[destination])
             if hdfmonkeyexecresult.returncode == 0:
                 command_execution = hdfmonkeyexecresult.stdout
-                
-                results_lines = command_execution.splitlines()
-                
-                if len(command_execution) > 0:
-                
-                    for files in results_lines:
-                
-                        directory_result_table = str.split(str(files), '\\t')
 
+                results_lines = command_execution.splitlines()
+
+                if len(command_execution) > 0:
+
+                    for files in results_lines:
+
+                        decoded_files = files.decode(errors="replace") if isinstance(files, bytes) else files
+                        directory_result_table = decoded_files.split('\t', 1)
+                        if len(directory_result_table) < 2:
+                            continue
                         file_type = directory_result_table[0]
-                        file_name = directory_result_table[1].replace("'", "").replace('"', "")
-                
+                        file_name = directory_result_table[1]
+
                         if not is_filetype_a_directory(file_type):
-                            hdfmonkeyexecresult = execute_hdf_monkey("rm", self.right_disk_image_path,'"' + destination + "/" + file_name + '"')
+                            hdfmonkeyexecresult = execute_hdf_monkey("rm", self.right_disk_image_path,
+                                                                     extra_argv=[destination + "/" + file_name])
                             if hdfmonkeyexecresult.returncode != 0:
                                 logging.error(f"Failed deleting file: {self.right_disk_image_path}{destination}/{file_name} - hdfmonkey result code: {hdfmonkeyexecresult.returncode}")
                                 add_main_log_window(f"Failed deleting file: {self.right_disk_image_path}{destination}/{file_name} - hdfmonkey result code: {hdfmonkeyexecresult.returncode}")            
@@ -917,10 +1274,11 @@ class MainWindow(QMainWindow):
                         else:
                             delete_sub_directory_content(image_path, destination + "/" + file_name)
                             # delete the directory in then end
-                            hdfmonkeyexecresult = execute_hdf_monkey("rm", self.right_disk_image_path,'"' + destination + "/" + file_name + '"')
+                            hdfmonkeyexecresult = execute_hdf_monkey("rm", self.right_disk_image_path,
+                                                                         extra_argv=[destination + "/" + file_name])
                             if hdfmonkeyexecresult.returncode != 0:
                                 logging.error(f"Failed deleting file: {self.right_disk_image_path}{destination}/{file_name} - hdfmonkey result code: {hdfmonkeyexecresult.returncode}")
-                                add_main_log_window(f"Failed deleting file: {self.right_disk_image_path}{destination}/{file_name} - hdfmonkey result code: {hdfmonkeyexecresult.returncode}")            
+                                add_main_log_window(f"Failed deleting file: {self.right_disk_image_path}{destination}/{file_name} - hdfmonkey result code: {hdfmonkeyexecresult.returncode}")
             
         # recursively get all files in sub directories from image and copy to disj
         def get_directory_content(image_path, image_source, disk_source, folder_name):
@@ -938,7 +1296,7 @@ class MainWindow(QMainWindow):
             if is_directory(image_path, image_source):
 
                 # list and get all files in that directory
-                hdfmonkeyexecresult = execute_hdf_monkey("ls", image_path, '"' + image_source + '"')
+                hdfmonkeyexecresult = execute_hdf_monkey("ls", image_path, extra_argv=[image_source])
                 if hdfmonkeyexecresult.returncode == 0:
                     command_execution = hdfmonkeyexecresult.stdout
                 
@@ -947,23 +1305,24 @@ class MainWindow(QMainWindow):
                     if len(command_execution) > 0:
                 
                         for files in results_lines:
-                
-                            directory_result_table = str.split(str(files), '\\t')
 
+                            decoded_files = files.decode(errors="replace") if isinstance(files, bytes) else files
+                            directory_result_table = decoded_files.split('\t', 1)
+                            if len(directory_result_table) < 2:
+                                continue
                             file_type = directory_result_table[0]
-                            file_name = directory_result_table[1].rstrip("'")
+                            file_name = directory_result_table[1]
 
                             if platform.system() == "Windows":
-                                disk_destination = disk_source + "\\" + file_name
+                                disk_destination = disk_source.replace('\\', '/') + "/" + file_name
                             else:
-                                disk_destination = disk_source + "/" + file_name                        
+                                disk_destination = disk_source + "/" + file_name
                 
                             if not is_filetype_a_directory(file_type):
                             
-                                get_source = '"' + image_source + "/" + file_name + '" "' + disk_destination + '"'
-                                get_source = get_source.replace('""', '"')
-                            
-                                hdfmonkeyexecresult = execute_hdf_monkey("get", self.right_disk_image_path, get_source)
+                                hdfmonkeyexecresult = execute_hdf_monkey("get", self.right_disk_image_path,
+                                                                         extra_argv=[image_source + "/" + file_name,
+                                                                                     disk_destination.replace('\\', '/')])
                                 if hdfmonkeyexecresult.returncode != 0:
                                     logging.error(f"Failed getting file: {self.right_disk_image_path}{image_source}/{file_name} - hdfmonkey result code: {hdfmonkeyexecresult.returncode}")
                                     add_main_log_window(f"Failed getting file: {self.right_disk_image_path}{image_source}/{file_name} - hdfmonkey result code: {hdfmonkeyexecresult.returncode}")            
@@ -1003,7 +1362,7 @@ class MainWindow(QMainWindow):
             
             root_folder , file_name_from_source = get_parent_root_directory_splited (source)
 
-            hdfmonkeyexecresult = execute_hdf_monkey("ls", image_path, root_folder)
+            hdfmonkeyexecresult = execute_hdf_monkey("ls", image_path, extra_argv=[root_folder])
 
             if hdfmonkeyexecresult.returncode == 0:
                 command_execution = hdfmonkeyexecresult.stdout
@@ -1011,11 +1370,12 @@ class MainWindow(QMainWindow):
                 results_lines = command_execution.splitlines()
 
                 for line in results_lines:                
-                    directory_result_table = str.split(str(line), '\\t')
-
+                    decoded_line = line.decode(errors="replace") if isinstance(line, bytes) else line
+                    directory_result_table = decoded_line.split('\t', 1)
+                    if len(directory_result_table) < 2:
+                        continue
                     file_type = directory_result_table[0]
-                    file_name = str(directory_result_table[1].rstrip("'"))
-                    file_name = file_name.replace('\\', "")
+                    file_name = directory_result_table[1]
                 
                     if file_name == file_name_from_source:
                         if is_filetype_a_directory(file_type):
@@ -1025,54 +1385,89 @@ class MainWindow(QMainWindow):
                         
             return False
 
+        def _run_delete_task(signals, cancel_event, image_path, disk_path_fn, files_to_delete):
+            """Background worker body for image_delete_files.
+            Phase 1: scan/count all items recursively (indeterminate progress).
+            Phase 2: delete each item with real percentage progress."""
+            actual = [f for f in files_to_delete if f != UP_DIRECTORY]
+
+            # ---- Phase 1: enumerate everything ----
+            signals.progress.emit(-1)   # indeterminate
+            all_files = []   # flat list of image paths to rm
+            all_dirs  = []   # directories to rm after their content
+            for f in actual:
+                if cancel_event.is_set():
+                    break
+                full = (disk_path_fn() + "/" + f).replace("//", "/")
+                signals.status.emit(f"Scanning\u2026\n{full}")
+                if is_directory(image_path, full):
+                    _scan_image_tree_for_delete(image_path, full, cancel_event,
+                                                signals, all_files, all_dirs)
+                    all_dirs.append(full)  # delete the top-level dir itself last
+                else:
+                    all_files.append(full)
+
+            if cancel_event.is_set():
+                return
+
+            # ---- Phase 2: delete ----
+            all_items = all_files + all_dirs   # files first, then dirs (deepest already ordered)
+            total     = max(len(all_items), 1)
+            for idx, item_path in enumerate(all_items):
+                if cancel_event.is_set():
+                    break
+                signals.status.emit(f"Deleting ({idx + 1}/{total})\n{item_path}")
+                signals.progress.emit(int(idx / total * 100))
+                try:
+                    execute_hdf_monkey("rm", image_path, extra_argv=[item_path])
+                except Exception as e:
+                    logging.error(f"Failed deleting: {item_path} - {e}")
+                    signals.error.emit(f"Failed deleting: {item_path}\n{e}")
+                signals.progress.emit(int((idx + 1) / total * 100))
+
         def image_delete_files():
-            
-            if len(right_disk_image_explorer_content) !=0:
-                set_all_buttons_disabled()
-                
-                for f in right_disk_image_selected_files:
-                    try:
-                        if f != UP_DIRECTORY:
-                            file_or_directory_to_delete = generate_disk_file_path() + "/" + f
-                            file_or_directory_to_delete = file_or_directory_to_delete.replace("//", "/") # if we are on root we get double slashes
-
-                            if is_directory(self.right_disk_image_path, generate_disk_file_path() + "/" + f ):
-                                
-                                delete_sub_directory_content(self.right_disk_image_path, file_or_directory_to_delete)
-                            
-                            hdfmonkeyexecresult = execute_hdf_monkey("rm", self.right_disk_image_path, file_or_directory_to_delete )
-                            
-                            if hdfmonkeyexecresult.returncode == 0:
-                                hdfmonkeyexecresult = execute_hdf_monkey("ls", self.right_disk_image_path,generate_disk_file_path())
-                                command_execution = hdfmonkeyexecresult.stdout
-
-                    except Exception as e:
-                        logging.error(f"Failed deleting file: {f} ! - Exception: {e}")
-                        add_main_log_window(f"Failed deleting file: {f} ! - Exception: {e}")
-                        set_all_buttons_enabled()
- 
-                hdfmonkeyexecresult = execute_hdf_monkey("ls", self.right_disk_image_path,generate_disk_file_path())
-                command_execution = hdfmonkeyexecresult.stdout
-                                
-                update_disk_manager_widget_table(command_execution)
-            else:
+            if not right_disk_image_explorer_content:
                 logging.info("Please select an image file or folder first to delete!")
                 add_main_log_window("Please select an image file or folder first to delete!")
+                return
 
-            set_all_buttons_enabled()
+            img_err = _check_image_writable(self.right_disk_image_path, check_free_space=False)
+            if img_err:
+                logging.error(img_err)
+                add_main_log_window(f"ERROR: {img_err}")
+                from PySide6.QtWidgets import QMessageBox
+                QMessageBox.critical(self, "Image not writable", img_err)
+                return
 
-            hdfmonkeyexecresult = execute_hdf_monkey("ls", self.right_disk_image_path,generate_disk_file_path())
-            
-            if hdfmonkeyexecresult.returncode == 0:
-                command_execution = hdfmonkeyexecresult.stdout
-                update_disk_manager_widget_table(command_execution)
-            else:
-                if hdfmonkeyexecresult is not None:
-                    logging.error(f"Failed browsing directory after deleting files - hdfmonkey result code: {hdfmonkeyexecresult.returncode}")
-                    add_main_log_window(f"Failed browsing directory after deleting files - hdfmonkey result code: {hdfmonkeyexecresult.returncode}")
+            files_snapshot = list(right_disk_image_selected_files)
+            image_path     = self.right_disk_image_path
+            disk_path_fn   = generate_disk_file_path
+
+            set_all_buttons_disabled()
+
+            dlg    = HdfProgressDialog("Deleting files\u2026", self)
+            worker = HdfTaskWorker(_run_delete_task, image_path, disk_path_fn, files_snapshot)
+
+            dlg.cancel_requested.connect(worker.cancel)
+            worker.signals.progress.connect(dlg.set_progress)
+            worker.signals.status.connect(dlg.set_status)
+            worker.signals.error.connect(add_main_log_window)
+            worker.signals.cancelled.connect(dlg.mark_cancelled)
+
+            def _on_delete_finished():
+                dlg.close()
+                result = execute_hdf_monkey("ls", image_path, extra_argv=[generate_disk_file_path()])
+                if result.returncode == 0:
+                    update_disk_manager_widget_table(result.stdout)
                 else:
-                    logging.error(f"Failed browsing directory after deleting files.")
-                    add_main_log_window(f"Failed browsing directory after deleting files.")
+                    logging.error(f"Failed browsing directory after deleting files - hdfmonkey result code: {result.returncode}")
+                    add_main_log_window(f"Failed browsing directory after deleting files - hdfmonkey result code: {result.returncode}")
+                set_all_buttons_enabled()
+
+            worker.signals.finished.connect(_on_delete_finished)
+            self.threadpool.start(worker)
+            dlg.exec()
+
 
         def nextsync_perform_checks_and_prepare_server_start():
             nextsync_warnings()
@@ -1099,77 +1494,143 @@ class MainWindow(QMainWindow):
 
             for ix in self.treeview.selectedIndexes():
 
-                # Re‑sort (in case the view has changed)
-                # (The proxy keeps the same sort order, but this forces a rebuild.)
-                self.proxy_model.invalidate()
-                self.proxy_model.sort(0, QtCore.Qt.AscendingOrder)
+                source_ix = self.proxy_model.mapToSource(ix)
 
-
-                if self.model.fileName(ix) == "..":
-
+                if self.model.fileName(source_ix) == "..":
+                    # Don't navigate on single-click; navigation happens on double-click.
+                    # Just clear the current selection so no stale file path is carried.
                     self.left_file_explorer_selection_file_name = ""
-                    self.left_file_explorer_selection_full_filename_path = self.model.filePath(ix)
-                    
-                    splitted_filepath = self.left_file_explorer_selection_full_filename_path.split('/')
-                    selected_explorer_item_directory_destination = ""
-                    for file_dest_token in range (0, len(splitted_filepath)-2):
-                        selected_explorer_item_directory_destination += splitted_filepath[file_dest_token] + "/"
-                        
-                    self.treeview.setRootIndex(self.model.index(selected_explorer_item_directory_destination,0))
-
-                    set_treeview_properties()
-                    self.treeview.show()
-                    
-                    self.file_explorer_path.setText(selected_explorer_item_directory_destination)
-                    
-                    configuration_dictionary[SETTING_EXPLORERPATH] = selected_explorer_item_directory_destination
-                    save_configuration_file()
+                    self.left_file_explorer_selection_full_filename_path = ""
                     break
-                
+
                 else:
-                    
-                    self.left_file_explorer_selection_file_name = self.model.fileName(ix)
-                    self.left_file_explorer_selection_full_filename_path = self.model.filePath(ix)
+
+                    self.left_file_explorer_selection_file_name = self.model.fileName(source_ix)
+                    self.left_file_explorer_selection_full_filename_path = self.model.filePath(source_ix)
                     if platform.system() != "Windows":
                         self.left_file_explorer_selection_full_filename_path.replace("\\", '/')                
-                
+
                     self.file_explorer_path.setText(self.left_file_explorer_selection_full_filename_path)
                     configuration_dictionary[SETTING_EXPLORERPATH] = self.left_file_explorer_selection_full_filename_path
                     save_configuration_file()
-                
+
                     break
 
-        def on_treeview_double_clicked():
-            # if the user clicks on ".." to go a level up in directory structure set the root path a level up
+        def on_treeview_double_clicked(ix):
+            # ix is the proxy index passed directly by the doubleClicked signal
+            if not ix.isValid():
+                return
+
             nextsync_hide_start_cancel_buttons()
             self.nextsync_prepare_server.setVisible(True)
 
-            # Re‑sort (in case the view has changed)
-            # (The proxy keeps the same sort order, but this forces a rebuild.)
-            self.proxy_model.invalidate()
-            self.proxy_model.sort(0, QtCore.Qt.AscendingOrder)
+            source_ix = self.proxy_model.mapToSource(ix)
+            file_name = self.model.fileName(source_ix)
+            file_path = self.model.filePath(source_ix)
 
-            for ix in self.treeview.selectedIndexes():
-                if self.model.fileName(ix) == "..":
-                    self.left_file_explorer_selection_file_name = ""
-                    self.left_file_explorer_selection_full_filename_path = self.model.filePath(ix)
-                    
-                    splitted_filepath = self.left_file_explorer_selection_full_filename_path.split('/')
-                    selected_explorer_item_directory_destination = ""
-                    for file_dest_token in range (0, len(splitted_filepath)-2):
-                        selected_explorer_item_directory_destination += splitted_filepath[file_dest_token] + "/"
-                        
-                    self.treeview.setRootIndex(self.model.index(selected_explorer_item_directory_destination,0))
-                    set_treeview_properties()
-                    self.treeview.show()
-                    
-                    self.file_explorer_path.setText(selected_explorer_item_directory_destination)
-                    
-                    configuration_dictionary[SETTING_EXPLORERPATH] = selected_explorer_item_directory_destination
-                    save_configuration_file()
-             
-                break         
+            if file_name == "..":
+                # Navigate one level up using the current root path as the reference
+                current_root_source = self.proxy_model.mapToSource(self.treeview.rootIndex())
+                current_root_path = self.model.filePath(current_root_source)
+                parent_path = os.path.dirname(current_root_path.rstrip("/\\"))
+                if not parent_path:
+                    return
+                selected_explorer_item_directory_destination = parent_path.replace("\\", "/") + "/"
+
+            elif self.model.isDir(source_ix):
+                # Navigate into the selected directory
+                selected_explorer_item_directory_destination = file_path
+                if not selected_explorer_item_directory_destination.endswith("/"):
+                    selected_explorer_item_directory_destination += "/"
+
+            else:
+                return
+
+            self.left_file_explorer_selection_file_name = ""
+            self.left_file_explorer_selection_full_filename_path = selected_explorer_item_directory_destination
+
+            self.treeview.setRootIndex(self.proxy_model.mapFromSource(self.model.index(selected_explorer_item_directory_destination, 0)))
+            set_treeview_properties()
+            self.treeview.show()
+
+            self.file_explorer_path.setText(selected_explorer_item_directory_destination)
+
+            configuration_dictionary[SETTING_EXPLORERPATH] = selected_explorer_item_directory_destination
+            save_configuration_file()
         
+        def on_treeview_context_menu(pos):
+            index = self.treeview.indexAt(pos)
+            if not index.isValid():
+                return
+            source_index = self.proxy_model.mapToSource(index)
+            name = self.model.fileName(source_index)
+            if name == "..":
+                return
+            file_path = self.model.filePath(source_index)
+            menu = QMenu(self.treeview)
+            action_copy_text = QAction("Copy text to clipboard", self.treeview)
+            action_copy_path = QAction("Copy path to clipboard", self.treeview)
+            action_copy_text.triggered.connect(lambda: QGuiApplication.clipboard().setText(name))
+            action_copy_path.triggered.connect(lambda: QGuiApplication.clipboard().setText(file_path))
+            menu.addAction(action_copy_text)
+            menu.addAction(action_copy_path)
+            menu.exec(self.treeview.viewport().mapToGlobal(pos))
+
+        def nextsync_on_treeview_context_menu(pos):
+            index = self.nextsync_treeview.indexAt(pos)
+            if not index.isValid():
+                return
+            source_index = self.nextsync_model.mapToSource(index)
+            name = self.nextsync_filesystem_model.fileName(source_index)
+            if name == "..":
+                return
+            file_path = self.nextsync_filesystem_model.filePath(source_index)
+            menu = QMenu(self.nextsync_treeview)
+            action_copy_text = QAction("Copy text to clipboard", self.nextsync_treeview)
+            action_copy_path = QAction("Copy path to clipboard", self.nextsync_treeview)
+            action_copy_text.triggered.connect(lambda: QGuiApplication.clipboard().setText(name))
+            action_copy_path.triggered.connect(lambda: QGuiApplication.clipboard().setText(file_path))
+            menu.addAction(action_copy_text)
+            menu.addAction(action_copy_path)
+            menu.exec(self.nextsync_treeview.viewport().mapToGlobal(pos))
+
+        def on_file_explorer_path_edited():
+            new_path = self.file_explorer_path.text().strip()
+            if os.path.exists(new_path):
+                norm = new_path.replace("\\", "/")
+                if not norm.endswith("/"):
+                    norm += "/"
+                self.left_file_explorer_selection_full_filename_path = norm
+                self.left_file_explorer_selection_file_name = ""
+                self.file_explorer_path.setText(norm)
+                self.treeview.setRootIndex(self.proxy_model.mapFromSource(self.model.index(norm, 0)))
+                set_treeview_properties()
+                self.treeview.show()
+                configuration_dictionary[SETTING_EXPLORERPATH] = norm
+                save_configuration_file()
+            else:
+                # Restore the previous valid value
+                self.file_explorer_path.setText(self.left_file_explorer_selection_full_filename_path)
+
+        def on_nextsync_file_explorer_path_edited():
+            new_path = self.nextsync_file_explorer_path.text().strip()
+            if os.path.exists(new_path):
+                norm = new_path.replace("\\", "/")
+                if not norm.endswith("/"):
+                    norm += "/"
+                self.left_file_nextsync_explorer_selection_full_filename_path = norm
+                self.left_file_nextsync_explorer_selection_file_name = ""
+                self.nextsync_file_explorer_path.setText(norm)
+                self.nextsync_treeview.setRootIndex(self.nextsync_model.mapFromSource(self.nextsync_filesystem_model.index(norm, 0)))
+                set_treeview_properties()
+                self.nextsync_treeview.show()
+                configuration_dictionary[SETTING_NEXTSYNC_EXPLORERPATH] = norm
+                save_configuration_file()
+                nextsync_show_sync_buttons_based_on_fileexplorer_content_selection()
+            else:
+                # Restore the previous valid value
+                self.nextsync_file_explorer_path.setText(self.left_file_nextsync_explorer_selection_full_filename_path)
+
         def nextsync_get_fileexplorer_root_selection():
               if self.left_file_nextsync_explorer_selection_full_filename_path != "":
                 selected_explorer_item_directory_destination = ""
@@ -1277,50 +1738,73 @@ class MainWindow(QMainWindow):
             save_configuration_file()               
 
         def nextsync_on_treeview_clicked():
-            
+
             nextsync_hide_start_cancel_buttons()
             self.nextsync_prepare_server.setVisible(True)
 
-            # Re‑sort (in case the view has changed)
-            # (The proxy keeps the same sort order, but this forces a rebuild.)
-            
-            self.nextsync_model.sort(0, QtCore.Qt.AscendingOrder)
-
             for ix in self.nextsync_treeview.selectedIndexes():
-                if self.nextsync_filesystem_model.fileName(ix) == "..":
+                source_ix = self.nextsync_model.mapToSource(ix)
+
+                if self.nextsync_filesystem_model.fileName(source_ix) == "..":
+                    # Don't navigate on single-click; navigation happens on double-click.
                     self.left_file_nextsync_explorer_selection_file_name = ""
-                    self.left_file_nextsync_explorer_selection_full_filename_path = self.nextsync_filesystem_model.filePath(ix)
-                    
-                    splitted_filepath = self.left_file_nextsync_explorer_selection_full_filename_path.split('/')
-                    selected_explorer_item_directory_destination = ""
-                    for file_dest_token in range (0, len(splitted_filepath)-2):
-                        selected_explorer_item_directory_destination += splitted_filepath[file_dest_token] + "/"
-                        
-                    self.nextsync_treeview.setRootIndex(self.nextsync_filesystem_model.index(selected_explorer_item_directory_destination,0))
-                    set_treeview_properties()
-                    self.nextsync_treeview.show()
-                    
-                    self.nextsync_file_explorer_path.setText(selected_explorer_item_directory_destination)
-                    
-                    configuration_dictionary[SETTING_NEXTSYNC_EXPLORERPATH] = selected_explorer_item_directory_destination
-                    save_configuration_file()
-                    
-                    nextsync_show_sync_buttons_based_on_fileexplorer_content_selection()
+                    self.left_file_nextsync_explorer_selection_full_filename_path = ""
                     break
-                
+
                 else:
-                    
-                    self.left_file_nextsync_explorer_selection_file_name = self.nextsync_filesystem_model.fileName(ix)
-                    self.left_file_nextsync_explorer_selection_full_filename_path = self.nextsync_filesystem_model.filePath(ix)
+
+                    self.left_file_nextsync_explorer_selection_file_name = self.nextsync_filesystem_model.fileName(source_ix)
+                    self.left_file_nextsync_explorer_selection_full_filename_path = self.nextsync_filesystem_model.filePath(source_ix)
                     if platform.system() != "Windows":
                         self.left_file_nextsync_explorer_selection_full_filename_path = self.left_file_nextsync_explorer_selection_full_filename_path.replace("\\", '/')
 
                     self.nextsync_file_explorer_path.setText(self.left_file_nextsync_explorer_selection_full_filename_path)
                     configuration_dictionary[SETTING_NEXTSYNC_EXPLORERPATH] = self.left_file_nextsync_explorer_selection_full_filename_path
                     save_configuration_file()
-                    
+
                     nextsync_show_sync_buttons_based_on_fileexplorer_content_selection()
                     break
+
+        def nextsync_on_treeview_double_clicked(ix):
+            if not ix.isValid():
+                return
+
+            nextsync_hide_start_cancel_buttons()
+            self.nextsync_prepare_server.setVisible(True)
+
+            source_ix = self.nextsync_model.mapToSource(ix)
+            file_name = self.nextsync_filesystem_model.fileName(source_ix)
+            file_path = self.nextsync_filesystem_model.filePath(source_ix)
+
+            if file_name == "..":
+                current_root_source = self.nextsync_model.mapToSource(self.nextsync_treeview.rootIndex())
+                current_root_path = self.nextsync_filesystem_model.filePath(current_root_source)
+                parent_path = os.path.dirname(current_root_path.rstrip("/\\"))
+                if not parent_path:
+                    return
+                selected_explorer_item_directory_destination = parent_path.replace("\\", "/") + "/"
+
+            elif self.nextsync_filesystem_model.isDir(source_ix):
+                selected_explorer_item_directory_destination = file_path
+                if not selected_explorer_item_directory_destination.endswith("/"):
+                    selected_explorer_item_directory_destination += "/"
+
+            else:
+                return
+
+            self.left_file_nextsync_explorer_selection_file_name = ""
+            self.left_file_nextsync_explorer_selection_full_filename_path = selected_explorer_item_directory_destination
+
+            self.nextsync_treeview.setRootIndex(self.nextsync_model.mapFromSource(self.nextsync_filesystem_model.index(selected_explorer_item_directory_destination, 0)))
+            set_treeview_properties()
+            self.nextsync_treeview.show()
+
+            self.nextsync_file_explorer_path.setText(selected_explorer_item_directory_destination)
+
+            configuration_dictionary[SETTING_NEXTSYNC_EXPLORERPATH] = selected_explorer_item_directory_destination
+            save_configuration_file()
+
+            nextsync_show_sync_buttons_based_on_fileexplorer_content_selection()
                 
         def image_explorer_selection_changed():
             
@@ -1333,118 +1817,312 @@ class MainWindow(QMainWindow):
                     column_number = idx.column()
                     right_disk_image_selected_files.append(right_disk_image_explorer_content[row_number][0])
         
+        def _run_get_task(signals, cancel_event, image_path, disk_path_fn, files_to_get,
+                          dest_dir, dir_nav, is_windows):
+            """Background worker body for transfert_content_from_image_to_disk.
+            Phase 1: scan/count all items recursively (indeterminate progress).
+            Phase 2: copy each file with real percentage progress."""
+
+            # ---- Phase 1: enumerate everything ----
+            signals.progress.emit(-1)   # indeterminate marquee
+            all_files = []   # list of (img_src_path, local_disk_path)
+            all_dirs  = []   # list of (img_src_path, local_disk_path)  – dirs to create
+
+            for f in files_to_get:
+                if cancel_event.is_set():
+                    break
+                source = (disk_path_fn() + "/" + f).replace("//", "/")
+                signals.status.emit(f"Scanning\u2026\n{source}")
+                if not is_directory(image_path, source):
+                    local = dest_dir + dir_nav + f
+                    all_files.append((source, local))
+                else:
+                    local_dir = os.path.join(dest_dir, f) if is_windows else dest_dir + "/" + f
+                    all_dirs.append((source, local_dir))
+                    _scan_image_tree_for_get(image_path, source, local_dir, cancel_event,
+                                             signals, all_files, all_dirs)
+
+            if cancel_event.is_set():
+                return
+
+            # ---- Phase 2: create directories then copy files ----
+            # Create all discovered directories first
+            for _, local_dir in all_dirs:
+                try:
+                    os.makedirs(local_dir, exist_ok=True)
+                except Exception as e:
+                    logging.error(f"Failed creating directory: {local_dir} - {e}")
+                    signals.error.emit(f"Failed creating directory: {local_dir}\n{e}")
+
+            total = max(len(all_files), 1)
+            for idx, (img_src, local_dst) in enumerate(all_files):
+                if cancel_event.is_set():
+                    break
+                signals.status.emit(f"Downloading ({idx + 1}/{total})\n{img_src}")
+                signals.progress.emit(int(idx / total * 100))
+                try:
+                    execute_hdf_monkey("get", image_path,
+                                       extra_argv=[img_src, local_dst.replace('\\', '/')])
+                except Exception as e:
+                    logging.error(f"Failed downloading: {img_src} - {e}")
+                    signals.error.emit(f"Failed downloading: {img_src}\n{e}")
+                signals.progress.emit(int((idx + 1) / total * 100))
+
         def transfert_content_from_image_to_disk():
-            
+
             global right_disk_image_explorer_content
-            
-            if len(right_disk_image_explorer_content) !=0: # check that we have an image content first
-                
-                set_all_buttons_disabled()
-                        
-                selected_explorer_item_directory_destination = ""
 
-                if len(self.left_file_explorer_selection_full_filename_path) !=0:
-                    splitted_filepath = self.left_file_explorer_selection_full_filename_path.split('/')
-                    dest_file_content = splitted_filepath[len(splitted_filepath)-1]
-                    # last directory should not containt a dot (that indicates it may be a file and we only want to copy to directories)
-                    if not os.path.isdir(self.left_file_explorer_selection_full_filename_path):
-                    # if '.' in dest_file_content:
-                        for file_dest_token in range (0, len(splitted_filepath)-1):
-                            selected_explorer_item_directory_destination += splitted_filepath[file_dest_token] + "/"
-                    else:
-                        selected_explorer_item_directory_destination = self.left_file_explorer_selection_full_filename_path
-                else:
-                    return
-            
-                directory_navigation = ""
-                if platform.system() == "Windows":
-                # Windows...
-                    selected_explorer_item_directory_destination = selected_explorer_item_directory_destination.replace("/", "\\")
-                    directory_navigation = "\\"
-                else:
-                    directory_navigation = "/"
-
-            
-                if len(right_disk_image_selected_files) !=0:
-                    for f in right_disk_image_selected_files:
-                        source = str(generate_disk_file_path() + "/" + f)
-                        source = source.replace("//","/") # replace double slashes on root
-                        #source = source.replace('"',"")
-                        if not is_directory(self.right_disk_image_path, source):
-                            if '"' not in source:
-                                source = '"' + source + '"'
-                                
-                            hdfmonkeyexecresult = execute_hdf_monkey("get", self.right_disk_image_path, source + ' "' + selected_explorer_item_directory_destination + directory_navigation + f + '"')
-                        else:
-                            # create the directory
-                            if platform.system() == "Windows": 
-                                
-                                try:
-                                    os.makedirs(selected_explorer_item_directory_destination + '\\'+ f)
-                                except FileExistsError:
-                                    pass
-                                except Exception as e:
-                                    logging.error(f"Failed creating directory: {selected_explorer_item_directory_destination}\\{f} - Exception: {e}")
-                                    add_main_log_window(f"Failed creating directory: {selected_explorer_item_directory_destination}\\{f} - Exception: {e}")   
-                                    
-                            else:
-                                
-                                try:
-                                    os.makedirs(selected_explorer_item_directory_destination + '/'+ f)
-                                except FileExistsError:
-                                    pass
-                                except:
-                                    logging.error(f"Failed creating directory: {selected_explorer_item_directory_destination}/{f}")
-                                    add_main_log_window(f"Failed creating directory: {selected_explorer_item_directory_destination}/{f}") 
-                            
-                            get_directory_content(self.right_disk_image_path, str(generate_disk_file_path()), selected_explorer_item_directory_destination, f)
-
-                set_all_buttons_enabled()
-                
-            else:
+            if not right_disk_image_explorer_content:
                 logging.warning("Please load an image file first !")
                 add_main_log_window("Please load an image file first !")
-                
-        def transfert_content_from_disk_to_image():
-            
-            global right_disk_image_explorer_content
-            
-            if len(right_disk_image_explorer_content) !=0: # check that we have an image content first
-                
-                set_all_buttons_disabled()
+                return
 
-                dest_file_path = generate_disk_file_path() + "/" + self.left_file_explorer_selection_file_name
-                dest_file_path = dest_file_path.replace('//', '/') # if on root dirctory we get double slashes
-                
-                if platform.system() == "Windows":
-                    self.left_file_explorer_selection_full_filename_path = self.left_file_explorer_selection_full_filename_path.replace("/","\\")
-                    
-                try:
-                    # try to upload the file
-                    hdfmonkeyexecresult = execute_hdf_monkey("put", self.right_disk_image_path, self.left_file_explorer_selection_full_filename_path + " " + dest_file_path)
-                except:
-                    logging.error(f"Failed uploading to image: {self.right_disk_image_path} file: { self.left_file_explorer_selection_full_filename_path} {dest_file_path}")
-                    add_main_log_window(f"Failed uploading to image: {self.right_disk_image_path} file: { self.left_file_explorer_selection_full_filename_path} {dest_file_path}")
-                
-                # refresh image explorer view after the upload
-                hdfmonkeyexecresult = execute_hdf_monkey("ls", self.right_disk_image_path, generate_disk_file_path())
-                
-                if hdfmonkeyexecresult.returncode == 0:
-                    command_execution = hdfmonkeyexecresult.stdout
-                    update_disk_manager_widget_table(command_execution)
+            set_all_buttons_disabled()
+
+            selected_explorer_item_directory_destination = ""
+            if self.left_file_explorer_selection_full_filename_path:
+                if not os.path.isdir(self.left_file_explorer_selection_full_filename_path):
+                    parts = self.left_file_explorer_selection_full_filename_path.split('/')
+                    selected_explorer_item_directory_destination = "/".join(parts[:-1]) + "/"
                 else:
-                    if hdfmonkeyexecresult is not None:
-                        logging.error(f"Failed browsing directory after uploading file - hdfmonkey result code: {hdfmonkeyexecresult.returncode}")
-                        add_main_log_window(f"Failed browsing directory after uploading file - hdfmonkey result code: {hdfmonkeyexecresult.returncode}")
-                    else:
-                        logging.error(f"Failed browsing directory after uploading file!")
-                        add_main_log_window(f"Failed browsing directory after uploading file!" )  
-                    
-                set_all_buttons_enabled()
-                
+                    selected_explorer_item_directory_destination = self.left_file_explorer_selection_full_filename_path
             else:
+                set_all_buttons_enabled()
+                return
+
+            is_windows = platform.system() == "Windows"
+            if is_windows:
+                selected_explorer_item_directory_destination = selected_explorer_item_directory_destination.replace("/", "\\")
+                directory_navigation = "\\"
+            else:
+                directory_navigation = "/"
+
+            if not right_disk_image_selected_files:
+                set_all_buttons_enabled()
+                return
+
+            files_snapshot = list(right_disk_image_selected_files)
+            image_path     = self.right_disk_image_path
+            disk_path_fn   = generate_disk_file_path
+
+            dlg    = HdfProgressDialog("Downloading from image\u2026", self)
+            worker = HdfTaskWorker(_run_get_task, image_path, disk_path_fn,
+                                   files_snapshot,
+                                   selected_explorer_item_directory_destination,
+                                   directory_navigation, is_windows)
+
+            dlg.cancel_requested.connect(worker.cancel)
+            worker.signals.progress.connect(dlg.set_progress)
+            worker.signals.status.connect(dlg.set_status)
+            worker.signals.error.connect(add_main_log_window)
+            worker.signals.cancelled.connect(dlg.mark_cancelled)
+
+            def _on_get_finished():
+                dlg.close()
+                set_all_buttons_enabled()
+
+            worker.signals.finished.connect(_on_get_finished)
+            self.threadpool.start(worker)
+            dlg.exec()
+
+                
+        def _check_access_denied_is_full_disk(image_path):
+            """If hdfmonkey returns Access denied, check whether it is a full volume.
+            Returns an error string if full, None otherwise."""
+            err = _check_image_writable(image_path, check_free_space=True)
+            if err and "volume is full" in err:
+                return (
+                    "The image volume is full — no space left to write.\n"
+                    "Delete files from the image to free space, or switch to a larger image file.\n"
+                    "Larger SD card images (.img) can be downloaded from https://zxnext.uk/hosted/"
+                )
+            return None
+
+        def _run_put_task(signals, cancel_event, image_path, upload_path, dest_file_path):
+            """Background worker body for transfert_content_from_disk_to_image.
+            For a single file: simple upload with status.
+            For a directory: Phase 1 scans the local tree, Phase 2 uploads each file."""
+
+            if not os.path.isdir(upload_path):
+                # ---- Single file ----
+                signals.status.emit(f"Uploading to image\n{os.path.basename(upload_path)}")
+                signals.progress.emit(0)
+                if not cancel_event.is_set():
+                    result = execute_hdf_monkey("put", image_path, extra_argv=[upload_path.replace('\\', '/'), dest_file_path])
+                    if result.returncode != 0:
+                        stdout_text = (result.stdout or b"").decode(errors="replace").strip()
+                        if "Access denied" in stdout_text:
+                            full_err = _check_access_denied_is_full_disk(image_path)
+                            if full_err:
+                                logging.error(full_err)
+                                signals.error.emit(full_err)
+                                cancel_event.set()
+                                return
+                        logging.error(f"Failed uploading to image: {image_path} file: {upload_path} {dest_file_path}")
+                        signals.error.emit(f"Failed uploading: {os.path.basename(upload_path)}")
+                signals.progress.emit(100)
+                return
+
+            # ---- Directory: Phase 1 enumerate local tree ----
+            signals.progress.emit(-1)   # indeterminate
+            all_files = []   # list of (local_path, image_dest_path)
+            all_img_dirs = []  # image-side directories to create, parents before children
+
+            def _scan_local_dir(local_dir, img_dir):
+                try:
+                    entries = os.listdir(local_dir)
+                except Exception as e:
+                    logging.error(f"Cannot list directory {local_dir}: {e}")
+                    return
+                for name in entries:
+                    if cancel_event.is_set():
+                        return
+                    local_path = os.path.join(local_dir, name)
+                    img_path   = (img_dir + "/" + name).replace("//", "/")
+                    signals.status.emit(f"Scanning\u2026\n{local_path}")
+                    if os.path.isdir(local_path):
+                        all_img_dirs.append(img_path)   # must mkdir before uploading into it
+                        _scan_local_dir(local_path, img_path)
+                    else:
+                        all_files.append((local_path, img_path))
+
+            # The top-level dest_file_path directory must also exist in the image
+            all_img_dirs.insert(0, dest_file_path)
+            _scan_local_dir(upload_path, dest_file_path)
+
+            if cancel_event.is_set():
+                return
+
+            # ---- Phase 1b: create all image-side directories (mkdir -p style) ----
+            # hdfmonkey mkdir cannot create intermediate paths, so we must ensure
+            # every ancestor segment exists before creating a child directory.
+            _img_dirs_created = set()
+
+            def _image_makedirs(img_dir_path):
+                """Create img_dir_path and all its ancestors inside the image.
+                Returns False and sets cancel_event if a full-disk condition is detected."""
+                parts = img_dir_path.strip("/").split("/")
+                for i in range(1, len(parts) + 1):
+                    if cancel_event.is_set():
+                        return False
+                    seg = "/" + "/".join(parts[:i])
+                    if seg in _img_dirs_created:
+                        continue
+                    signals.status.emit(f"Creating directory\n{seg}")
+                    result = execute_hdf_monkey("mkdir", image_path, extra_argv=[seg], silent=True)
+                    mkdir_stdout = (result.stdout or b"").decode(errors="replace").strip()
+                    if result.returncode == 0:
+                        _img_dirs_created.add(seg)
+                    else:
+                        if "Access denied" in mkdir_stdout:
+                            full_err = _check_access_denied_is_full_disk(image_path)
+                            if full_err:
+                                logging.error(full_err)
+                                signals.error.emit(full_err)
+                                cancel_event.set()
+                                return False
+                        # Non-zero may mean already exists — verify with ls
+                        ls_result = execute_hdf_monkey("ls", image_path, extra_argv=[seg], silent=True)
+                        ls_stdout = (ls_result.stdout or b"").decode(errors="replace").strip()
+                        if ls_result.returncode == 0:
+                            _img_dirs_created.add(seg)   # exists already — fine
+                        else:
+                            logging.warning(f"mkdir failed and directory not found: {seg} (rc={result.returncode})"
+                                            + (f" | mkdir stdout: {mkdir_stdout}" if mkdir_stdout else "")
+                                            + (f" | ls stdout: {ls_stdout}" if ls_stdout else ""))
+                return True
+
+            for img_dir in all_img_dirs:
+                if cancel_event.is_set():
+                    break
+                if not _image_makedirs(img_dir):
+                    break
+
+            if cancel_event.is_set():
+                return
+
+            # ---- Phase 2: upload each file ----
+            total = max(len(all_files), 1)
+            for idx, (local_path, img_dst) in enumerate(all_files):
+                if cancel_event.is_set():
+                    break
+                signals.status.emit(f"Uploading ({idx + 1}/{total})\n{local_path}")
+                signals.progress.emit(int(idx / total * 100))
+                result = execute_hdf_monkey("put", image_path, extra_argv=[local_path.replace('\\', '/'), img_dst])
+                if result.returncode != 0:
+                    stdout_text = (result.stdout or b"").decode(errors="replace").strip()
+                    if "Access denied" in stdout_text:
+                        full_err = _check_access_denied_is_full_disk(image_path)
+                        if full_err:
+                            logging.error(full_err)
+                            signals.error.emit(full_err)
+                            cancel_event.set()
+                            break
+                    logging.error(f"Failed uploading: {local_path} -> {img_dst} | stdout: {stdout_text}")
+                    signals.error.emit(f"Failed uploading: {os.path.basename(local_path)}")
+                signals.progress.emit(int((idx + 1) / total * 100))
+
+        def transfert_content_from_disk_to_image():
+
+            global right_disk_image_explorer_content
+
+            if not right_disk_image_explorer_content:
                 logging.warning("Please load an image file first !")
-                add_main_log_window("Please load an image first!")  
+                add_main_log_window("Please load an image first!")
+                return
+
+            img_err = _check_image_writable(self.right_disk_image_path)
+            if img_err:
+                logging.error(img_err)
+                add_main_log_window(f"ERROR: {img_err}")
+                from PySide6.QtWidgets import QMessageBox
+                QMessageBox.critical(self, "Image not writable", img_err)
+                return
+
+            _warn_if_image_nearly_full(self.right_disk_image_path)
+
+            set_all_buttons_disabled()
+
+            dest_file_path = (generate_disk_file_path() + "/" + self.left_file_explorer_selection_file_name).replace('//', '/')
+
+            upload_path = self.left_file_explorer_selection_full_filename_path
+            if platform.system() == "Windows":
+                upload_path = upload_path.replace("/", "\\")
+
+            image_path      = self.right_disk_image_path
+            sel_path        = self.left_file_explorer_selection_full_filename_path
+            disk_path_fn    = generate_disk_file_path
+
+            dlg    = HdfProgressDialog("Uploading to image\u2026", self)
+            worker = HdfTaskWorker(_run_put_task, image_path, upload_path, dest_file_path)
+
+            dlg.cancel_requested.connect(worker.cancel)
+            worker.signals.progress.connect(dlg.set_progress)
+            worker.signals.status.connect(dlg.set_status)
+            worker.signals.error.connect(add_main_log_window)
+            worker.signals.cancelled.connect(dlg.mark_cancelled)
+
+            def _on_put_finished():
+                dlg.close()
+                display_path = sel_path
+                if not os.path.isdir(display_path):
+                    display_path = os.path.dirname(display_path.rstrip("/\\")).replace("\\", "/") + "/"
+                self.treeview.setRootIndex(self.proxy_model.mapFromSource(self.model.index(display_path, 0)))
+                set_treeview_properties()
+                self.treeview.show()
+                self.file_explorer_path.setText(display_path)
+                result = execute_hdf_monkey("ls", image_path, extra_argv=[disk_path_fn()])
+                if result.returncode == 0:
+                    update_disk_manager_widget_table(result.stdout)
+                else:
+                    logging.error(f"Failed browsing directory after uploading file - hdfmonkey result code: {result.returncode}")
+                    add_main_log_window(f"Failed browsing directory after uploading file - hdfmonkey result code: {result.returncode}")
+                set_all_buttons_enabled()
+
+            worker.signals.finished.connect(_on_put_finished)
+            self.threadpool.start(worker)
+            dlg.exec()
+
         
         def generate_disk_file_path():
             result_path = "/"
@@ -1479,23 +2157,18 @@ class MainWindow(QMainWindow):
                 # If user picked to go one directory level up
                 if row_number == 0 and right_disk_image_explorer_content[row_number][0] == UP_DIRECTORY and right_disk_image_explorer_content[row_number][1] == "":
                     right_disk_image_explorer_path.pop()
-                    hdfmonkeyexecresult = execute_hdf_monkey("ls", self.right_disk_image_path, generate_disk_file_path())
-                
+                    hdfmonkeyexecresult = execute_hdf_monkey("ls", self.right_disk_image_path, extra_argv=[generate_disk_file_path()])
+
                     if hdfmonkeyexecresult.returncode == 0:
                         command_execution = hdfmonkeyexecresult.stdout
                         self.diskimageexplorerlabelpath.setText(generate_disk_file_path().replace('//', '/'))
                         update_disk_manager_widget_table(command_execution)
                         set_all_buttons_enabled()
                         return
-            
+
                 if right_disk_image_explorer_content[row_number][1] == 'DIR':
                     right_disk_image_explorer_path.append(right_disk_image_explorer_content[row_number][0])
-                    list_source = generate_disk_file_path()
-                    
-                    if '"' not in list_source:
-                        list_source = '"' + list_source + '"'
-                    
-                    hdfmonkeyexecresult = execute_hdf_monkey("ls", self.right_disk_image_path, list_source )
+                    hdfmonkeyexecresult = execute_hdf_monkey("ls", self.right_disk_image_path, extra_argv=[generate_disk_file_path()])
                 
                     if hdfmonkeyexecresult.returncode == 0:
                         command_execution = hdfmonkeyexecresult.stdout
@@ -1516,10 +2189,9 @@ class MainWindow(QMainWindow):
             
             self.TableWidgetImage.clear()
             set_table_image_properties()
-            
+
             self.TableWidgetImage.setRowCount(0)
             self.TableWidgetImage.setRowCount(len(results_lines)+1)
-            set_table_image_properties()
             self.TableWidgetImage.verticalHeader().setVisible(False)
             
             row = 0
@@ -1550,11 +2222,12 @@ class MainWindow(QMainWindow):
             self.image_explorer_item_list.clear()
             
             for dirvalues in results_lines:
-                
-                directory_result_table = str.split(str(dirvalues), '\\t')
+                decoded_line = dirvalues.decode(errors="replace") if isinstance(dirvalues, bytes) else dirvalues
+                directory_result_table = decoded_line.split('\t', 1)
+                if len(directory_result_table) < 2:
+                    continue
                 file_type = directory_result_table[0]
-                file_name = directory_result_table[1].rstrip("'")
-                file_name = file_name.replace('"', '')
+                file_name = directory_result_table[1]
 
                 newItemName = QTableWidgetItem(str(file_name))
                 
@@ -1580,19 +2253,17 @@ class MainWindow(QMainWindow):
                     
 
                 else:
-                    if not is_filetype_a_directory(file_type):
-                        try:
-                            file_size = str(str.split(file_type,"'")[1])
-                        except:
-                            logging.info(f"update_disk_manager_widget_table file split failed for: {file_type}")
-                            file_size = "0"
-                    
+                    try:
+                        # file_type is e.g. "[1234 bytes]" – extract the number
+                        file_size = file_type.strip("[]").split()[0]
+                    except Exception:
+                        logging.info(f"update_disk_manager_widget_table file split failed for: {file_type}")
+                        file_size = "0"
+
                     newItemFS = QTableWidgetItem(file_size)
-                    
-                    if '.' in file_name:
-                        newItemExt = QTableWidgetItem(str.split(file_name, '.')[1])
-                    else:
-                        newItemExt = QTableWidgetItem("")
+
+                    file_ext = str.split(file_name, '.')[1] if '.' in file_name else ""
+                    newItemExt = QTableWidgetItem(file_ext)
                         
                     newItemFS.setForeground(FONT_GREEN)
                     newItemName.setForeground(FONT_GREEN)
@@ -1613,7 +2284,7 @@ class MainWindow(QMainWindow):
 
                     
                     if '.' in file_name:
-                        right_disk_image_explorer_content.append((file_name, str.split(file_name, '.')[1]))
+                        right_disk_image_explorer_content.append((file_name, file_ext))
                     else:
                         right_disk_image_explorer_content.append((file_name, ""))
                         
@@ -1649,11 +2320,12 @@ class MainWindow(QMainWindow):
             r = []
             gf = glob.glob(path_to_content + "**", recursive=True)
             for g in gf:
-                if os.path.isfile(g) and os.path.exists(g):
+                if os.path.isfile(g):
                     ignored = False
                     for i in ignorelist:
                         if fnmatch.fnmatch(g, i):
                             ignored = True
+                            break
                     if not self.nextsync_alwayssync_checkbox.isChecked():
                         if g in knownfiles:
                             if agecheck(path_to_content, g):
@@ -1761,23 +2433,8 @@ class MainWindow(QMainWindow):
             
             
             
-            hostinfo = socket.gethostbyname_ex(socket.gethostname())    
-            add_nextsync_log_window ("Running on host:\n    " + str(hostinfo[0]) , False)
-            if hostinfo[1] != []:
-                add_nextsync_log_window ("Aliases:", False)
-                for x in hostinfo[1]:
-                    add_nextsync_log_window ("    " + str(x), False)
-            if hostinfo[2] != []:
-                add_nextsync_log_window ("IP addresses:", False)
-                for x in hostinfo[2]:
-                    add_nextsync_log_window ("    " + str(x), False)
+            nextsync_show_ip_info()
 
-            # If we're unsure of the ip, try getting it via internet connection
-            if len(hostinfo[2]) > 1 or "127" in hostinfo[2][0]:
-                with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-                    s.connect(("8.8.8.8", 80)) # ping google dns
-                    add_nextsync_log_window ("Primary IP:\n    " + str(s.getsockname()[0]), False)              
-            
             if len(self.left_file_nextsync_explorer_selection_full_filename_path) !=0:
                 splitted_filepath = self.left_file_nextsync_explorer_selection_full_filename_path.split('/')
                 if not os.path.isdir(self.left_file_nextsync_explorer_selection_full_filename_path):
@@ -2007,16 +2664,17 @@ class MainWindow(QMainWindow):
             self.hdfm_gooey_diskdrive.setVisible(False)
         
         self.filterlabel = QLabel()
-        self.filterlabel.setText(FILTER_LABEL_TEXT)
+        self.filterlabel.setText("Search: ")
 
-        
+
         self.horizontal2.addWidget(self.filterlabel)
-        
+
         self.filtertext = QLineEdit()
-        self.filtertext.returnPressed.connect(apply_file_extension_filter)
+        self.filtertext.setPlaceholderText("Filter by name...")
+        self.filtertext.textChanged.connect(apply_file_extension_filter)
         self.filtertext.setMinimumWidth(FILTER_TEXT_WIDTH)
         self.filtertext.setMaximumWidth(FILTER_TEXT_WIDTH)
-        
+
         self.horizontal2.addWidget(self.filtertext)
 
         self.diskimageexplorerlabel = QLabel()
@@ -2040,21 +2698,22 @@ class MainWindow(QMainWindow):
         self.model.setFilter(~QDir.NoDotAndDotDot | QDir.NoDot)
 
         self.treeview = QTreeView()
-        self.treeview.setModel(self.model)
         self.treeview.setSortingEnabled(True)
-        self.model.sort(0, Qt.AscendingOrder)
 
-        self.proxy_model = QSortFilterProxyModel(recursiveFilteringEnabled = True, filterRole = QFileSystemModel.FileNameRole)
-        self.proxy_model.setSourceModel(self.model)   
-        
+        self.proxy_model = DotDotFirstProxyModel(recursiveFilteringEnabled = True, filterRole = QFileSystemModel.FileNameRole)
+        self.proxy_model.setSourceModel(self.model)
         self.proxy_model.setSortCaseSensitivity(QtCore.Qt.CaseInsensitive)
         self.proxy_model.setDynamicSortFilter(True)
 
-        self.treeview.setRootIndex(self.model.index(available_drives[0]))
+        self.treeview.setModel(self.proxy_model)
+        self.treeview.setRootIndex(self.proxy_model.mapFromSource(self.model.index(available_drives[0])))
         
         self.treeview.show()
+        self.treeview.setColumnWidth(0, 250)
         self.treeview.doubleClicked.connect(on_treeview_double_clicked)
         self.treeview.clicked.connect(on_treeview_clicked)
+        self.treeview.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.treeview.customContextMenuRequested.connect(on_treeview_context_menu)
 
         self.centralbuttonscontainer = QWidget()
         self.centralbuttons = QVBoxLayout()
@@ -2186,11 +2845,13 @@ class MainWindow(QMainWindow):
         self.imageexplorerbuttonscontainer.setLayout(self.imageexplorerbuttons)
 
         # Show Explorer selected Path
-       
-        self.file_explorer_path = QLabel()
+
+        self.file_explorer_path = QLineEdit()
         self.file_explorer_path.setText("-")
-        
-        self.horizontal4.addWidget(self.file_explorer_path)        
+        self.file_explorer_path.setPlaceholderText("Path...")
+        self.file_explorer_path.editingFinished.connect(on_file_explorer_path_edited)
+
+        self.horizontal4.addWidget(self.file_explorer_path)
 
         self.hdfm_gooey_form.addRow(self.horizontal4)
 
@@ -2330,12 +2991,13 @@ class MainWindow(QMainWindow):
         
         # Add Filter
         self.nextsync_filterlabel = QLabel()
-        self.nextsync_filterlabel.setText(FILTER_LABEL_TEXT)
+        self.nextsync_filterlabel.setText("Search: ")
 
         self.horizontal10.addWidget(self.nextsync_filterlabel)
 
         self.nextsync_filtertext = QLineEdit()
-        self.nextsync_filtertext.returnPressed.connect(apply_file_extension_filter_nextsync)
+        self.nextsync_filtertext.setPlaceholderText("Filter by name...")
+        self.nextsync_filtertext.textChanged.connect(apply_file_extension_filter_nextsync)
         self.nextsync_filtertext.setMinimumWidth(FILTER_TEXT_WIDTH + 400)
         self.nextsync_filtertext.setMaximumWidth(FILTER_TEXT_WIDTH + 400)
 
@@ -2353,35 +3015,36 @@ class MainWindow(QMainWindow):
         self.nextsync_filesystem_model.sort(0, Qt.AscendingOrder)
 
 
-        self.nextsync_treeview.setModel(self.nextsync_filesystem_model)
-        self.nextsync_treeview.setSortingEnabled(True)
-
-
-        
-        self.nextsync_model = QSortFilterProxyModel(recursiveFilteringEnabled = True, filterRole = QFileSystemModel.FileNameRole)
-        self.nextsync_model.setSourceModel(self.nextsync_filesystem_model)       
-        
+        self.nextsync_model = DotDotFirstProxyModel(recursiveFilteringEnabled = True, filterRole = QFileSystemModel.FileNameRole)
+        self.nextsync_model.setSourceModel(self.nextsync_filesystem_model)
         self.nextsync_model.setSortCaseSensitivity(QtCore.Qt.CaseInsensitive)
         self.nextsync_model.setDynamicSortFilter(True)
 
-        self.nextsync_treeview.setRootIndex(self.nextsync_filesystem_model.index(available_drives[0]))
-
+        self.nextsync_treeview.setModel(self.nextsync_model)
+        self.nextsync_treeview.setSortingEnabled(True)
+        self.nextsync_treeview.setRootIndex(self.nextsync_model.mapFromSource(self.nextsync_filesystem_model.index(available_drives[0])))
         self.nextsync_model.sort(0, QtCore.Qt.AscendingOrder)
-        
-        self.nextsync_treeview.show()
 
-        self.nextsync_treeview.clicked.connect(nextsync_on_treeview_clicked)   
+        self.nextsync_treeview.show()
+        self.nextsync_treeview.setColumnWidth(0, 250)
+
+        self.nextsync_treeview.clicked.connect(nextsync_on_treeview_clicked)
+        self.nextsync_treeview.doubleClicked.connect(nextsync_on_treeview_double_clicked)
+        self.nextsync_treeview.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.nextsync_treeview.customContextMenuRequested.connect(nextsync_on_treeview_context_menu)
         
         set_treeview_properties()            
         
         self.nextsync_container_fileexplorer_and_buttons_buttons.addWidget(self.nextsync_treeview)
 
         # Show Explorer selected Path
-       
-        self.nextsync_file_explorer_path = QLabel()
+
+        self.nextsync_file_explorer_path = QLineEdit()
         self.nextsync_file_explorer_path.setText("-")
-        
-        self.nextsync_container_fileexplorer_and_buttons_buttons.addWidget(self.nextsync_file_explorer_path)   
+        self.nextsync_file_explorer_path.setPlaceholderText("Path...")
+        self.nextsync_file_explorer_path.editingFinished.connect(on_nextsync_file_explorer_path_edited)
+
+        self.nextsync_container_fileexplorer_and_buttons_buttons.addWidget(self.nextsync_file_explorer_path)
 
 
         self.horizontal12.addWidget(self.nextsync_fileexplorer_and_buttons_container)
@@ -2513,14 +3176,16 @@ class MainWindow(QMainWindow):
         #  Start main logic
 
         load_configuration_file()
-        
+
         if is_hdfmonkey_present():
-            load_image()
+            if load_image():
+                _warn_if_image_nearly_full(self.right_disk_image_path)
         else:
             if platform.system() == "Windows":
                 if show_hdf_monkey_download_and_install_buttons():
                     if is_hdfmonkey_present():
-                        load_image()
+                        if load_image():
+                            _warn_if_image_nearly_full(self.right_disk_image_path)
 
         if len(right_disk_image_explorer_content) == 0:
             self.diskimageexplorerlabelpath.setText("Please load an image.")
